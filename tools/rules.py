@@ -1,7 +1,7 @@
 """Add proposed rules. People confirm or reject them on the workspace page.
 
 Usage:
-  python tools/rules.py propose <draft.json>
+  ./.tools/uv run tools/rules.py propose <draft.json>
 
 The draft is a list of rules:
 [

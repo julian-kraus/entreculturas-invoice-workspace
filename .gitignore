@@ -14,3 +14,7 @@ __pycache__/
 
 # Keep the Claude Code skills and preview settings in the repository
 !.claude/
+
+# Everything the setup installs stays in this folder
+.tools/
+.venv/

@@ -1,9 +1,9 @@
 """Test invoices: invoices with answers a person confirmed, used to measure how well checks work.
 
 Usage:
-  python tools/evaluate.py add <invoice> [--aside]   # from a reviewed result; usually done on the page
-  python tools/evaluate.py clear-latest               # before checking all test invoices again
-  python tools/evaluate.py score                      # compare the latest checks with the confirmed answers
+  ./.tools/uv run tools/evaluate.py add <invoice> [--aside]   # from a reviewed result; usually done on the page
+  ./.tools/uv run tools/evaluate.py clear-latest               # before checking all test invoices again
+  ./.tools/uv run tools/evaluate.py score                      # compare the latest checks with the confirmed answers
 """
 
 from __future__ import annotations

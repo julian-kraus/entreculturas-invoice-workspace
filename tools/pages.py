@@ -1,8 +1,8 @@
 """Turn invoice files into page images the assistant can look at.
 
 Usage:
-  python tools/pages.py pending [--set evaluation]     # invoices without a result yet
-  python tools/pages.py render <invoice> [--set evaluation]
+  ./.tools/uv run tools/pages.py pending [--set evaluation]     # invoices without a result yet
+  ./.tools/uv run tools/pages.py render <invoice> [--set evaluation]
 """
 
 from __future__ import annotations

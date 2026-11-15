@@ -1,9 +1,9 @@
 """Changes the assistant proposes. People approve or reject them on the workspace page.
 
 Usage:
-  python tools/proposals.py corrections        # what reviewers corrected, for suggesting changes
-  python tools/proposals.py propose <draft.json>
-  python tools/proposals.py list               # proposals still waiting
+  ./.tools/uv run tools/proposals.py corrections        # what reviewers corrected, for suggesting changes
+  ./.tools/uv run tools/proposals.py propose <draft.json>
+  ./.tools/uv run tools/proposals.py list               # proposals still waiting
 
 The draft is a list of changes to existing items:
 [

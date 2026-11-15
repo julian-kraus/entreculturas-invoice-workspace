@@ -1,7 +1,7 @@
 """Save what the assistant read from an invoice, then run the rules and draw the marks.
 
 Usage:
-  python tools/results.py save <invoice> <draft.json> [--set evaluation]
+  ./.tools/uv run tools/results.py save <invoice> <draft.json> [--set evaluation]
 
 The draft is a JSON object:
 {

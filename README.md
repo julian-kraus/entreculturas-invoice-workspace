@@ -2,6 +2,8 @@
 
 Check grant justification invoices with your own AI assistant (Claude Code or Codex), consistently and with evidence.
 
+To set it up, give your assistant the link to this repository (see Setup). Assistant: follow the Setup section in `AGENTS.md`.
+
 You work in two places:
 
 - **The chat** with the assistant, for the jobs that need reading: checking invoices, proposing rules from funder guidelines, running test invoices.
@@ -11,18 +13,23 @@ Everything stays in this folder on your computer. The assistant reads invoice pa
 
 ## Setup
 
-Do this once per computer. It takes about 15 minutes.
+You need only Claude Code (the Claude desktop app) or Codex (the ChatGPT desktop app), signed in with your own account. The assistant installs everything else into the workspace folder: no administrator rights, nothing installed on the rest of your computer.
 
-1. **Install Python** 3.10 or newer from [python.org](https://www.python.org/downloads/). On Windows, tick "Add Python to PATH" during installation.
-2. **Install your assistant:** the Claude desktop app (Claude Code) or the ChatGPT desktop app (Codex). Sign in with your own account.
-3. **Get this folder:** download it as a ZIP and unzip it somewhere you keep work files, or paste the repository link into the assistant and ask it to download it.
-4. **Open the folder in the assistant.**
-   - Claude Code: open the folder as a project.
-   - Codex: open the folder, and choose to trust it when asked, so it uses the assistant settings.
-5. **Ask: "Set this up".** The assistant installs the Python packages (`pip install -r requirements.txt`) and checks that everything works.
-6. **Ask: "Open the workspace".** The page opens at http://localhost:8790. You can also double-click `start-workspace.command` (Mac) or `start-workspace.bat` (Windows).
-7. **Choose or create a project** at the top of the page. To work like a colleague, choose **New project** and pick the setup file they shared.
-8. **Check the assistant settings** (last tab). Sonnet with medium effort for checking invoices keeps usage moderate. Use Opus only where careful reading matters more than usage.
+1. Create an empty folder, for example `Invoice workspace` in your Documents.
+2. Open it in your assistant: in Claude Code as a new project, in Codex as a new project (choose to trust the folder when asked).
+3. Paste this message:
+
+   > Set up the invoice workspace from https://github.com/julian-kraus/entreculturas-invoice-workspace in this folder.
+
+   The assistant downloads the files, installs its tools into the folder and checks that everything works. Approve its steps when it asks. This takes a few minutes.
+4. Start a new chat in the same folder, so the assistant picks up the workspace skills.
+5. Ask: **"Open the workspace"**. The page opens at http://localhost:8790. Later you can also double-click `start-workspace.command` (Mac) or `start-workspace.bat` (Windows) in the folder.
+6. Choose a project at the top of the page, or **New project**. To work like a colleague, choose **New project** and pick the setup file they shared.
+7. Look at **Assistant settings** (last tab). Sonnet with medium effort for checking invoices keeps usage moderate.
+
+## Removing it
+
+Delete the folder. The Python, packages and tools the assistant installed are all inside it (in `.tools` and `.venv`), so nothing stays behind. Deleting the folder also deletes your invoices, results and test invoices, so keep a copy of what you need first, for example the Excel report and **Download setup to share**.
 
 ## A normal week
 
@@ -72,8 +79,9 @@ Test invoices are invoices your team already checked, with the right answers sav
 
 ## For maintainers
 
-- `tools/`: plain Python tools the skills call. `python -m pytest tests` runs the tests.
-- `skills/`: the source of the skills. `python tools/sync_skills.py` copies them to `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex). Copies are used because Git on Windows often skips symbolic links.
+- `tools/`: plain Python tools the skills call. `./.tools/uv run pytest tests` runs the tests.
+- Setup uses [uv](https://docs.astral.sh/uv/), installed into `.tools/` together with its own Python (see Setup in `AGENTS.md`). Dependencies are in `pyproject.toml` and `uv.lock`.
+- `skills/`: the source of the skills. `./.tools/uv run tools/sync_skills.py` copies them to `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex). Copies are used because Git on Windows often skips symbolic links.
 - `AGENTS.md`: instructions for the assistant. `CLAUDE.md` imports it for Claude Code.
 - `app/`: the workspace page. It listens only on this computer and never calls an AI.
 - `tools/import_csv_config.py`: creates a project from the CSV configuration of the earlier invoice agent prototype.

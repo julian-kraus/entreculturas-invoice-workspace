@@ -1,6 +1,9 @@
 #!/bin/bash
 cd "$(dirname "$0")" || exit 1
-PYTHON=python3
-command -v python3 >/dev/null 2>&1 || PYTHON=python
-( sleep 1 && open "http://localhost:8790" ) &
-"$PYTHON" app/server.py
+if [ ! -x .tools/uv ]; then
+  echo "The workspace is not set up yet. Open this folder in Claude Code or Codex and ask: Set this up."
+  read -r -p "Press Enter to close."
+  exit 1
+fi
+( sleep 2 && open "http://localhost:8790" ) &
+./.tools/uv run app/server.py

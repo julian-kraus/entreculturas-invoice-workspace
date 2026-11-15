@@ -5,8 +5,8 @@ applies the rules, adds checks across all invoices of the project (duplicate inv
 and writes the outcome back. Reviewer corrections in the "review" part always win.
 
 Usage:
-  python tools/checks.py run <invoice> [--set evaluation]
-  python tools/checks.py run --all [--set evaluation]
+  ./.tools/uv run tools/checks.py run <invoice> [--set evaluation]
+  ./.tools/uv run tools/checks.py run --all [--set evaluation]
 """
 
 from __future__ import annotations

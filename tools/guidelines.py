@@ -1,8 +1,8 @@
 """Read funder guidelines so rules can cite the page they come from.
 
 Usage:
-  python tools/guidelines.py list
-  python tools/guidelines.py text <file name> [--pages 3-7]
+  ./.tools/uv run tools/guidelines.py list
+  ./.tools/uv run tools/guidelines.py text <file name> [--pages 3-7]
 """
 
 from __future__ import annotations

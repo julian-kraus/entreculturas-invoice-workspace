@@ -1,7 +1,7 @@
 """Draw the evidence marks on the invoice pages and save a marked PDF.
 
 Usage:
-  python tools/marks.py <invoice> [--set evaluation]
+  ./.tools/uv run tools/marks.py <invoice> [--set evaluation]
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ It only listens on this computer (127.0.0.1). It never calls an AI: checking inv
 proposing rules happen in the chat. Everything is saved in projects/<project>/.
 
 Usage:
-  python app/server.py [--port 8790]
+  ./.tools/uv run app/server.py [--port 8790]
 """
 
 from __future__ import annotations

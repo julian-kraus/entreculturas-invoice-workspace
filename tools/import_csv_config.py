@@ -1,7 +1,7 @@
 """Create a project from the CSV configuration format of the earlier invoice agent prototype.
 
 Usage:
-  python tools/import_csv_config.py "<project name>" <invoice_types.csv> <extraction_fields.csv> <compliance_rules.csv>
+  ./.tools/uv run tools/import_csv_config.py "<project name>" <invoice_types.csv> <extraction_fields.csv> <compliance_rules.csv>
       [--groups general,aexcid] [--confirm-rules R_VOL_101,R_VOL_001,...]
 
 Imported rules start as "proposed" unless listed in --confirm-rules. Rule types that the

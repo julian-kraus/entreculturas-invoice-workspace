@@ -5,12 +5,12 @@ names a block of cells. Inside a range, a finer 4 x 4 grid (columns a-d, rows 1-
 narrows it down, e.g. "b2:c3".
 
 Usage:
-  python tools/grid.py grid <page.png>
+  ./.tools/uv run tools/grid.py grid <page.png>
       Writes <page>-grid.png with labelled cells. Look at it and note the cells for each value.
-  python tools/grid.py sheet <page.png> <spec.json>
+  ./.tools/uv run tools/grid.py sheet <page.png> <spec.json>
       spec: {"total_amount": "J8:K8", "stamp": "E6:I8"}
       Writes <page>-sheet.png: each range enlarged with the finer a-d / 1-4 grid.
-  python tools/grid.py finalize <page.png> <spec.json>
+  ./.tools/uv run tools/grid.py finalize <page.png> <spec.json>
       spec: {"total_amount": {"cells": "J8:K8", "sub": "a2:d3"}, "stamp": {"cells": "E6:I8"}}
       Prints the final boxes (fractions of the page) and writes <page>-check.png showing
       each box in red with some surrounding context. Look at it to confirm every value

@@ -5,7 +5,7 @@ description: Explain what this invoice workspace can do and suggest the next ste
 
 # Help
 
-Run `python tools/project.py list` (use `python3` if `python` is not found) and answer in plain words, short:
+Run `./.tools/uv run tools/project.py list` and answer in plain words, short:
 
 1. Which project is selected, and how many invoices it has, checked and not yet checked.
 2. What they can ask you in the chat:

@@ -1,7 +1,7 @@
 """Create the Excel report for the selected project.
 
 Usage:
-  python tools/report.py
+  ./.tools/uv run tools/report.py
 """
 
 from __future__ import annotations

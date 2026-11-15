@@ -1,10 +1,10 @@
 """Projects: list, show, switch and create.
 
 Usage:
-  python tools/project.py list
-  python tools/project.py show            # what the assistant needs to check invoices
-  python tools/project.py switch <project>
-  python tools/project.py create "<name>" [--copy-rules-from <project>]
+  ./.tools/uv run tools/project.py list
+  ./.tools/uv run tools/project.py show            # what the assistant needs to check invoices
+  ./.tools/uv run tools/project.py switch <project>
+  ./.tools/uv run tools/project.py create "<name>" [--copy-rules-from <project>]
 """
 
 from __future__ import annotations

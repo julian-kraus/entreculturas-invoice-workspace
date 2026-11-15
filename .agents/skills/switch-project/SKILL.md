@@ -5,10 +5,10 @@ description: Show the projects in this workspace, switch to another one, or crea
 
 # Switch project
 
-Work from the repository root (use `python3` if `python` is not found).
+Work from the repository root.
 
-- List projects: `python tools/project.py list`. Say which one is selected and how many invoices each has.
-- Switch: `python tools/project.py switch "<name or part of it>"`. If several match, ask which one.
-- Create: `python tools/project.py create "<name>"`. To start from another project's invoice types and rules, add `--copy-rules-from <project>`. Copied rules start as proposed, so tell the person to confirm them on the workspace page.
+- List projects: `./.tools/uv run tools/project.py list`. Say which one is selected and how many invoices each has.
+- Switch: `./.tools/uv run tools/project.py switch "<name or part of it>"`. If several match, ask which one.
+- Create: `./.tools/uv run tools/project.py create "<name>"`. To start from another project's invoice types and rules, add `--copy-rules-from <project>`. Copied rules start as proposed, so tell the person to confirm them on the workspace page.
 
 After switching or creating, confirm the selected project in one sentence. The workspace page shows the same selection after a refresh.

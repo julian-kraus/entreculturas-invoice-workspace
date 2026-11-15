@@ -10,8 +10,8 @@ assistant-settings.json decides which model and effort each job uses:
   for the whole project. Codex only reads it once the project is trusted.
 
 Usage:
-  python tools/sync_skills.py          # write the copies and settings
-  python tools/sync_skills.py --check  # exit 1 if anything is out of date
+  ./.tools/uv run tools/sync_skills.py          # write the copies and settings
+  ./.tools/uv run tools/sync_skills.py --check  # exit 1 if anything is out of date
 """
 
 from __future__ import annotations
