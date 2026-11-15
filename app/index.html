@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice Workspace</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Invoice Workspace</div>
+  <label class="project-pick">Project
+    <select id="project-select" aria-label="Selected project"></select>
+  </label>
+  <button type="button" class="ghost" id="new-project-btn">New project</button>
+  <span class="spacer"></span>
+  <button type="button" class="ghost" id="help-btn">Help</button>
+</header>
+
+<dialog id="help-dialog" class="wide">
+  <div class="dialog-head"><h2>Help</h2><button type="button" class="ghost" id="help-close">Close</button></div>
+  <h3>Ask in the chat</h3>
+  <ul>
+    <li><b>“Check the new invoices”</b>: reads each invoice, applies the confirmed rules and marks where it found things.</li>
+    <li><b>“Propose rules from the guidelines”</b>: suggests rules with their source page and where to look.</li>
+    <li><b>“Suggest improvements”</b>: looks at your corrections and proposes clearer descriptions. You approve them under Rules and types.</li>
+    <li><b>“Run the test invoices”</b>: checks your test invoices again and compares with your confirmed answers.</li>
+    <li><b>“Switch to project …”</b> or <b>“Start a new project”</b>.</li>
+  </ul>
+  <h3>On this page</h3>
+  <p>Add invoices, review and correct results, approve proposals, edit descriptions and rules, see the history, and choose models under Assistant settings.</p>
+  <h3>First-time setup</h3>
+  <ol>
+    <li>Install Python 3.10 or newer, and Claude Code (desktop app) or Codex.</li>
+    <li>Open this folder in the app and ask: “Set this up”.</li>
+    <li>Ask: “Open the workspace”, or double-click <code>start-workspace</code> in the folder.</li>
+    <li>Choose a project at the top, or create one (you can start from a colleague’s setup file).</li>
+    <li>Codex only: trust this folder when Codex asks, so it uses the assistant settings.</li>
+  </ol>
+  <p class="muted small">The full guide is in README.md in this folder.</p>
+</dialog>
+
+<dialog id="confirm-dialog">
+  <p id="confirm-text"></p>
+  <div class="row-end">
+    <button type="button" class="ghost" id="confirm-no">Stay</button>
+    <button type="button" class="primary" id="confirm-yes">Leave without saving</button>
+  </div>
+</dialog>
+
+<dialog id="new-project-dialog">
+  <form method="dialog" id="new-project-form">
+    <h2>New project</h2>
+    <label>Name <input id="new-project-name" required></label>
+    <label>Start from the types and rules of
+      <select id="new-project-copy"><option value="">Nothing, start empty</option></select>
+    </label>
+    <p class="muted">Copied rules start as proposed, so you confirm which apply.</p>
+    <label>Or start from a setup file a colleague shared
+      <input type="file" id="new-project-file" accept=".json">
+    </label>
+    <div class="row-end">
+      <button type="button" class="ghost" id="new-project-cancel">Cancel</button>
+      <button type="submit" class="primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button role="tab" id="tab-invoices" aria-selected="true" data-tab="invoices">Invoices</button>
+  <button role="tab" id="tab-setup" aria-selected="false" data-tab="setup">Rules and types</button>
+  <button role="tab" id="tab-tests" aria-selected="false" data-tab="tests">Test invoices</button>
+  <button role="tab" id="tab-history" aria-selected="false" data-tab="history">History</button>
+  <button role="tab" id="tab-settings" aria-selected="false" data-tab="settings">Assistant settings</button>
+</nav>
+
+<main>
+  <div id="notice" class="notice" role="status" hidden></div>
+
+  <section id="panel-invoices" class="panel" role="tabpanel" aria-labelledby="tab-invoices">
+    <div class="invoices-layout">
+      <aside class="invoice-list-wrap">
+        <label class="drop" id="invoice-drop">
+          <input type="file" id="invoice-upload" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple hidden>
+          <b>Add invoices</b><span>Drop PDFs or photos here, or click</span>
+        </label>
+        <p class="muted small">Then ask in the chat: “Check the new invoices”.</p>
+        <ul id="invoice-list" class="invoice-list"></ul>
+        <button type="button" class="ghost full" id="report-btn">Create Excel report</button>
+      </aside>
+      <div id="invoice-detail" class="invoice-detail">
+        <p class="empty">Choose an invoice on the left.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="panel-setup" class="panel" role="tabpanel" aria-labelledby="tab-setup" hidden>
+    <div id="proposals-box"></div>
+    <nav class="subtabs" aria-label="Setup sections">
+      <button data-sub="rules" class="active">Rules</button>
+      <button data-sub="types">Invoice types</button>
+      <button data-sub="fields">Fields to extract</button>
+      <button data-sub="learnings">Tips from corrections</button>
+      <button data-sub="project">Project details</button>
+    </nav>
+    <div id="setup-body"></div>
+  </section>
+
+  <section id="panel-tests" class="panel" role="tabpanel" aria-labelledby="tab-tests" hidden></section>
+  <section id="panel-history" class="panel" role="tabpanel" aria-labelledby="tab-history" hidden></section>
+  <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden></section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

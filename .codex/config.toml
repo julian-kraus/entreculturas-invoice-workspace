@@ -1,0 +1,2 @@
+# Written by tools/sync_skills.py from assistant-settings.json. Edit the settings on the workspace page.
+model_reasoning_effort = "medium"

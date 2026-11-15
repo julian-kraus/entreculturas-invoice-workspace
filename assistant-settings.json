@@ -1,0 +1,8 @@
+{
+  "claude": {
+    "reading": {"model": "sonnet", "effort": "medium"},
+    "rules": {"model": "opus", "effort": "high"},
+    "other": {"model": "sonnet", "effort": "low"}
+  },
+  "codex": {"model": "", "effort": "medium"}
+}
