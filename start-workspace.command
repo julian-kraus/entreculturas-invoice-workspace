@@ -5,5 +5,4 @@ if [ ! -x .tools/uv ]; then
   read -r -p "Press Enter to close."
   exit 1
 fi
-( sleep 2 && open "http://localhost:8790" ) &
-./.tools/uv run app/server.py
+exec ./.tools/uv run --locked app/server.py --open-browser

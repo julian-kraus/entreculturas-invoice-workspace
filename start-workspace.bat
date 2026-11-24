@@ -5,6 +5,5 @@ if not exist ".tools\uv.exe" (
   pause
   exit /b 1
 )
-start "" "http://localhost:8790"
-.tools\uv.exe run app\server.py
+.tools\uv.exe run --locked app\server.py --open-browser
 if errorlevel 1 pause

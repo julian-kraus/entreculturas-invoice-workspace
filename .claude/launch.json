@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "workspace",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["app/server.py", "--port", "8790"],
+      "runtimeExecutable": "./.tools/uv",
+      "runtimeArgs": ["run", "--locked", "app/server.py", "--port", "8790"],
       "port": 8790
     }
   ]

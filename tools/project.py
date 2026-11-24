@@ -10,15 +10,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import shutil
+import errno
 import sys
+import tempfile
+from pathlib import Path
 
 from common import (
-    PROJECTS, WorkspaceError, current_project, invoice_files, list_projects, load_config,
-    load_json, log, now_iso, print_json, project_dir, result_path, save_json, set_current_project, slugify,
+    WorkspaceError, current_project, existing_project, invoice_files, list_projects, load_config,
+    load_json, log, now_iso, print_json, project_dir, result_path, save_json, set_current_project, slugify, storage_slug,
 )
-
-CONFIG_FILES = ("invoice_types.json", "fields.json", "rules.json")
 
 
 def project_summary(slug: str) -> dict:
@@ -62,29 +62,57 @@ def show(slug: str) -> dict:
     }
 
 
-def create(name: str, copy_from: str | None) -> str:
-    slug = slugify(name)
-    target = PROJECTS / slug
+def _publish_project(name: str, setup: dict) -> str:
+    name = name.strip()
+    if not name:
+        raise WorkspaceError("Give the project a name.")
+    slug = storage_slug(name)
+    target = project_dir(slug)
+    target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise WorkspaceError(f"A project called '{slug}' already exists.")
-    target.mkdir(parents=True)
-    for sub in ("invoices", "results", "guidelines", "evaluation/invoices", "evaluation/latest", "evaluation/runs"):
-        (target / sub).mkdir(parents=True, exist_ok=True)
-    save_json(target / "project.json", {"name": name, "funder": "", "period_start": "", "period_end": "", "currency": ""})
+    # Publish only after the complete setup is readable; a failed copy/import
+    # must not leave a half-created project that blocks a retry.
+    with tempfile.TemporaryDirectory(prefix=".new-project-", dir=target.parent) as tmp:
+        staging = Path(tmp) / "project"
+        for sub in ("invoices", "results", "guidelines", "evaluation/invoices", "evaluation/latest", "evaluation/runs"):
+            (staging / sub).mkdir(parents=True)
+        for key in ("invoice_types", "fields", "rules", "learnings"):
+            save_json(staging / f"{key}.json", setup[key])
+        save_json(staging / "project.json", setup["project"] | {"name": name})
+        try:
+            staging.rename(target)
+        except OSError as error:
+            if error.errno in (errno.EEXIST, errno.ENOTEMPTY) or target.exists():
+                raise WorkspaceError(f"A project called '{slug}' already exists.") from error
+            raise
+    return slug
+
+
+def create(name: str, copy_from: str | None) -> str:
     if copy_from:
-        source = project_dir(copy_from)
-        for filename in CONFIG_FILES:
-            if (source / filename).exists():
-                shutil.copy(source / filename, target / filename)
-        rules = load_json(target / "rules.json", [])
-        for rule in rules:
+        config = load_config(existing_project(copy_from))
+        for rule in config["rules"]:
             if rule.get("status") == "confirmed":
                 rule["status"] = "proposed"
-        save_json(target / "rules.json", rules)
     else:
-        for filename in CONFIG_FILES:
-            save_json(target / filename, [])
-    save_json(target / "learnings.json", [])
+        config = {"rules": [], "invoice_types": [{
+            "id": "INVOICE", "name": "Invoice", "enabled": True,
+            "description": "An invoice or receipt documenting an expense.",
+            "what_to_look_for": "Look for the supplier, date, invoice number, total and currency.",
+        }]}
+        starter_fields = [
+            ("supplier", "Supplier", "text"), ("invoice_number", "Invoice number", "text"),
+            ("invoice_date", "Invoice date", "date"), ("total_amount", "Total amount", "amount"),
+            ("currency", "Currency", "text"),
+        ]
+        config["fields"] = [
+            {"id": f"INVOICE_{key}", "type_id": "INVOICE", "name": key, "label": label,
+             "kind": kind, "hint": "", "required": False} for key, label, kind in starter_fields
+        ]
+    config["project"] = {"funder": "", "period_start": "", "period_end": "", "currency": ""}
+    config["learnings"] = []
+    slug = _publish_project(name, config)
     log(slug, "staff", "project created", {"name": name, "copied_rules_from": copy_from})
     return slug
 
@@ -103,15 +131,18 @@ def export_setup(slug: str) -> dict:
 def import_setup(name: str, setup: dict) -> str:
     if not isinstance(setup, dict) or setup.get("format") != SETUP_FORMAT:
         raise WorkspaceError("This file is not a setup exported from the invoice workspace.")
+    config = {"project": setup.get("project", {})}
+    if not isinstance(config["project"], dict):
+        raise WorkspaceError("The project's details are invalid.")
     for key in ("invoice_types", "fields", "rules", "learnings"):
-        if not isinstance(setup.get(key, []), list):
+        rows = setup.get(key, [])
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise WorkspaceError(f"The setup file has an invalid '{key}' part.")
-    slug = create(name, None)
-    target = PROJECTS / slug
-    info = setup.get("project") if isinstance(setup.get("project"), dict) else {}
-    save_json(target / "project.json", info | {"name": name})
-    for key in ("invoice_types", "fields", "rules", "learnings"):
-        save_json(target / f"{key}.json", setup.get(key, []))
+        ids = [row.get("id") for row in rows]
+        if any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids):
+            raise WorkspaceError(f"Every entry in '{key}' needs its own id.")
+        config[key] = rows
+    slug = _publish_project(name, config)
     log(slug, "staff", "project created from a setup file", {"exported_at": setup.get("exported_at"),
         "rules": len(setup.get("rules", [])), "types": len(setup.get("invoice_types", []))})
     return slug

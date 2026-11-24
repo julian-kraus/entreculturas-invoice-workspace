@@ -15,5 +15,5 @@ Run `./.tools/uv run tools/project.py list` and answer in plain words, short:
    - "Suggest improvements" (suggest-improvements): proposes clearer descriptions from corrections
    - "Switch to project …" or "Start a new project" (switch-project)
    - "Open the workspace" (open-workspace)
-3. What they do on the workspace page: add invoices and guidelines, approve or reject what you proposed (top of Rules and types), edit invoice type descriptions, review findings and correct values, add reviewed invoices as test invoices, see the history and create the Excel report.
+3. The page can copy a request for one invoice, the displayed batch, or a specific finding. Ask the person to paste it into this project chat. What they do on the workspace page: add invoices and guidelines, approve or reject what you proposed (top of Project setup), edit invoice type descriptions, review findings and correct values, add reviewed invoices as test invoices, see the history and create the Excel report.
 4. One suggested next step based on the project's state, for example confirming proposed rules before the first check, or reviewing invoices that need a look.

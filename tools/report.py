@@ -13,33 +13,42 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from checks import final_fields
+from checks import final_fields, record_for_display
 from common import WorkspaceError, current_project, load_config, load_json, log, print_json, rel, set_dirs
 
-FILLS = {"fails rules": "F8D7D2", "needs a look": "FBEBC8", "passes": "D6EEE3"}
+FILLS = {"fails rules": "F8D7D2", "needs a look": "FBEBC8", "passes": "D6EEE3", "no applicable rules": "FBEBC8"}
+
+
+SUMMARY_COLUMNS = ["Invoice", "File", "Type", "Status", "Date", "Total", "Currency", "Failed rules", "Reviewed", "Rules checked"]
+
+
+def summary_row(result: dict, type_names: dict) -> list:
+    fields = final_fields(result)
+    failed = [o["name"] for o in result.get("rule_results", []) if o["outcome"] == "failed"]
+    return [
+        result["invoice"], result.get("display_file", result.get("file")), type_names.get(result["type_id"], result["type_id"]),
+        result.get("status"), fields.get("invoice_date", {}).get("value"), fields.get("total_amount", {}).get("value"),
+        fields.get("currency", {}).get("value"), "; ".join(failed),
+        "yes" if (result.get("review") or {}).get("status") == "confirmed" else "no", result.get("rules_checked", 0),
+    ]
 
 
 def build(slug: str, who: str = "assistant") -> str:
     config = load_config(slug)
     type_names = {t["id"]: t.get("name", t["id"]) for t in config["invoice_types"]}
     _, results_dir = set_dirs(slug, "invoices")
-    results = [load_json(p) for p in sorted(results_dir.glob("*.json"))] if results_dir.exists() else []
+    results = [record_for_display(load_json(p)) for p in sorted(results_dir.glob("*.json")) if not p.name.startswith(".")]
     book = Workbook()
     summary = book.active
     summary.title = "Invoices"
-    summary.append(["Invoice", "File", "Type", "Status", "Date", "Total", "Currency", "Failed rules", "Reviewed"])
+    summary.append(SUMMARY_COLUMNS)
     findings = book.create_sheet("Findings")
     findings.append(["Invoice", "Rule", "Outcome", "Severity", "Explanation", "Changed by reviewer"])
     fields_sheet = book.create_sheet("Fields")
     fields_sheet.append(["Invoice", "Field", "Value", "Status", "Corrected by reviewer"])
     for result in results:
         fields = final_fields(result)
-        value = lambda name: (fields.get(name) or {}).get("value")
-        failed = [o["name"] for o in result.get("rule_results", []) if o["outcome"] == "failed"]
-        review = result.get("review") or {}
-        summary.append([result.get("invoice"), result.get("file"), type_names.get(result.get("type_id"), result.get("type_id")),
-                        result.get("status", "not checked"), value("invoice_date"), value("total_amount"), value("currency"),
-                        "; ".join(failed), "yes" if review.get("status") == "confirmed" else "no"])
+        summary.append(summary_row(result, type_names))
         fill = FILLS.get(result.get("status"))
         if fill:
             summary.cell(row=summary.max_row, column=4).fill = PatternFill("solid", fgColor=fill)
@@ -56,7 +65,7 @@ def build(slug: str, who: str = "assistant") -> str:
             width = max((len(str(c.value)) for c in column if c.value is not None), default=8)
             sheet.column_dimensions[get_column_letter(index)].width = min(max(width + 2, 10), 60)
         sheet.freeze_panes = "A2"
-    path = results_dir / f"report-{datetime.now().strftime('%Y%m%d-%H%M')}.xlsx"
+    path = results_dir / f"report-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.xlsx"
     path.parent.mkdir(parents=True, exist_ok=True)
     book.save(path)
     log(slug, who, "report created", {"file": path.name, "invoices": len(results)})
@@ -98,7 +107,7 @@ def build_setup(slug: str, who: str = "staff") -> str:
             sheet.column_dimensions[get_column_letter(col)].width = 18 if col < 4 else 45
         sheet.freeze_panes = "A2"
     _, results_dir = set_dirs(slug, "invoices")
-    path = results_dir / f"setup-{slug}-{datetime.now().strftime('%Y%m%d-%H%M')}.xlsx"
+    path = results_dir / f"setup-{slug}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.xlsx"
     path.parent.mkdir(parents=True, exist_ok=True)
     book.save(path)
     log(slug, who, "setup exported", {"file": path.name})

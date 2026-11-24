@@ -9,6 +9,7 @@ This folder helps a non-technical team check invoices for grant justification. P
 
 - Use the skills in this repository: check-invoices, propose-rules, suggest-improvements, run-evaluation, switch-project, open-workspace, invoice-help. Follow their steps exactly.
 - Run tools from the repository root with `./.tools/uv run tools/<tool>.py`. They print JSON or a plain error explaining what to fix.
+- Pin the project for each task that reads or changes project data. Use `tools/project.py list` to resolve the requested project, or take the selected slug when none was named. Set `INVOICE_PROJECT` to that slug on every subsequent tool invocation for the task, including saves and evaluation. On macOS/Linux, prefix each command with `INVOICE_PROJECT=<slug>`. In Windows PowerShell set `$env:INVOICE_PROJECT='<slug>'` in the same invocation. If the request, file and project conflict, clarify before saving.
 - Speak plainly. The people you help are not technical. Don't show JSON, file paths or commands unless they ask.
 - Keep invoice details in the chat to what the person needs. The invoices contain personal data.
 
@@ -25,6 +26,8 @@ This folder helps a non-technical team check invoices for grant justification. P
 - `workspace.json`: which project is selected
 - `skills/`: the skills; `tools/sync_skills.py` copies them to `.claude/skills/` and `.agents/skills/`
 
+- `templates/example-aexcid.json`: importable example setup with proposed rules. Staff-owned projects and local assistant preferences stay outside Git.
+
 ## Setup
 
 Everything the workspace needs is installed inside this folder (`.tools/` and `.venv/`), so deleting the folder removes it completely. Nothing is installed system-wide and nothing needs administrator rights.
@@ -36,11 +39,11 @@ When someone asks to set things up, opens this folder for the first time, or a t
    - Windows (PowerShell): `$env:UV_INSTALL_DIR="$PWD\.tools"; $env:UV_NO_MODIFY_PATH="1"; irm https://astral.sh/uv/install.ps1 | iex`
    - If the program ended up in `.tools/bin/`, move it (and `uvx`) up into `.tools/`.
 2. **Install Python and the packages into this folder:**
-   - Mac or Linux: `UV_PYTHON_INSTALL_DIR=.tools/python ./.tools/uv sync --python 3.12 --python-preference only-managed`
-   - Windows (PowerShell): `$env:UV_PYTHON_INSTALL_DIR=".tools\python"; ./.tools/uv sync --python 3.12 --python-preference only-managed`
-3. **Check:** `./.tools/uv run pytest -q tests` and `./.tools/uv run tools/project.py list`.
+   - Mac or Linux: `UV_PYTHON_INSTALL_DIR=.tools/python ./.tools/uv sync --locked --python 3.12 --python-preference only-managed`
+   - Windows (PowerShell): `$env:UV_PYTHON_INSTALL_DIR=".tools\python"; ./.tools/uv sync --locked --python 3.12 --python-preference only-managed`
+3. **Check:** `./.tools/uv run --locked pytest -q tests`, `./.tools/uv run --locked tools/sync_skills.py --check` and `./.tools/uv run --locked tools/project.py list`.
 4. If no project is selected, help them choose or create one (switch-project skill), then offer to open the workspace page.
 
 If the person started from the repository link in an empty folder, first get the files: `git clone <link> .` if git is available, otherwise download `<link>/archive/refs/heads/main.zip` and unpack its contents into this folder. Then do the steps above, and tell them to start a new chat in this folder so the skills load.
 
-To remove the workspace, the person deletes this folder. Remind them that this also deletes their invoices, results and test invoices, so they should keep a copy of anything they need (for example the Excel report and "Download setup to share").
+Before replacing or removing an installation, close the server and finish any running checks. Preserve the entire `projects/` directory, including confirmed results, history and test answers, plus `workspace.json` and local assistant preferences. Follow the README recovery procedure. Reports and setup exports each contain only a subset of the project.

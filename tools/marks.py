@@ -38,19 +38,24 @@ def marks_for(result: dict) -> list[dict]:
     return items
 
 
-def draw(slug: str, invoice_id: str, which: str) -> dict:
-    result = load_json(result_path(slug, invoice_id, which))
+def draw(slug: str, invoice_id: str, which: str, *, result: dict | None = None,
+         out_dir: Path | None = None, save_pages: bool = True) -> dict:
+    if result is None:
+        result = load_json(result_path(slug, invoice_id, which))
     if not result:
         raise WorkspaceError(f"There is no result for '{invoice_id}' yet.")
     pages_dir = work_dir(slug, invoice_id, which)
-    if not list(pages_dir.glob("page-*.png")):
+    if not (pages_dir / "page-1.png").is_file():
         render(slug, invoice_id, which)
     _, results_dir = set_dirs(slug, which)
-    out_dir = results_dir / "marked"
+    if out_dir is None:
+        out_dir = (results_dir / result["marked_file"]).parent if result.get("marked_file") else results_dir / "marked"
     out_dir.mkdir(parents=True, exist_ok=True)
     items = marks_for(result)
-    page_files = sorted(pages_dir.glob("page-[0-9]*.png"), key=lambda p: int(p.stem.split("-")[1]))
-    page_files = [p for p in page_files if p.stem.count("-") == 1]
+    page_files = sorted((p for p in pages_dir.glob("page-*.png") if p.stem[5:].isdecimal()),
+                        key=lambda p: int(p.stem[5:]))
+    if any(item["page"] < 1 or item["page"] > len(page_files) for item in items):
+        raise WorkspaceError("An evidence box points to a page outside this document. Check its page number.")
     marked_pages, outputs = [], []
     for page_file in page_files:
         number = int(page_file.stem.split("-")[1])
@@ -67,13 +72,15 @@ def draw(slug: str, invoice_id: str, which: str) -> dict:
             tx, ty = max(0, right - tw), max(0, top - th)
             canvas.rectangle([tx, ty, tx + tw, ty + th], fill=color)
             canvas.text((tx + 7, ty + 4), tag, fill=(255, 255, 255), font=label_font)
-        path = out_dir / f"{invoice_id}-page-{number}.png"
-        image.save(path)
-        outputs.append(rel(path))
+        if save_pages:
+            path = out_dir / f"{invoice_id}-page-{number}.png"
+            image.save(path)
+            outputs.append(rel(path))
         marked_pages.append(image)
     pdf_path = out_dir / f"{invoice_id}-marked.pdf"
-    if marked_pages:
-        marked_pages[0].save(pdf_path, save_all=True, append_images=marked_pages[1:], resolution=150)
+    if not marked_pages:
+        raise WorkspaceError("The invoice has no readable pages.")
+    marked_pages[0].save(pdf_path, save_all=True, append_images=marked_pages[1:], resolution=150)
     return {"invoice": invoice_id, "marks": items, "pages": outputs, "pdf": rel(pdf_path)}
 
 

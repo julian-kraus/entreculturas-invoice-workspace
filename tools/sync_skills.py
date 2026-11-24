@@ -3,7 +3,8 @@
 Claude Code reads .claude/skills/, Codex reads .agents/skills/. Copies are used instead of
 links because Git on Windows often does not create symbolic links.
 
-assistant-settings.json decides which model and effort each job uses:
+assistant-settings.json supplies defaults. The website saves preferences in assistant-settings.local.json.
+Only skill files present in skills/ and the managed model settings are updated:
 - Claude Code: each skill copy gets `model` and `effort` in its header (they apply while the
   skill runs), and .claude/settings.json gets the default for everything else.
 - Codex: skills cannot set their own model, so .codex/config.toml gets one model and effort
@@ -20,12 +21,15 @@ import json
 import sys
 from pathlib import Path
 
+import tomlkit
+
 from common import ROOT, load_json
 
 SOURCE = ROOT / "skills"
 CLAUDE_SKILLS = ROOT / ".claude" / "skills"
 CODEX_SKILLS = ROOT / ".agents" / "skills"
-SETTINGS_FILE = ROOT / "assistant-settings.json"
+SHIPPED_SETTINGS = ROOT / "assistant-settings.json"
+SETTINGS_FILE = ROOT / "assistant-settings.local.json"
 CLAUDE_SETTINGS = ROOT / ".claude" / "settings.json"
 CODEX_CONFIG = ROOT / ".codex" / "config.toml"
 
@@ -44,7 +48,8 @@ DEFAULT_SETTINGS = {
 
 def load_settings() -> dict:
     settings = json.loads(json.dumps(DEFAULT_SETTINGS))
-    saved = load_json(SETTINGS_FILE, {}) or {}
+    saved = load_json(SETTINGS_FILE) if SETTINGS_FILE.exists() else load_json(SHIPPED_SETTINGS, {})
+    saved = saved or {}
     for job, value in (saved.get("claude") or {}).items():
         if job in settings["claude"] and isinstance(value, dict):
             settings["claude"][job].update({k: v for k, v in value.items() if k in ("model", "effort")})
@@ -94,11 +99,13 @@ def expected_files(settings: dict) -> dict[Path, str]:
     claude_settings["effortLevel"] = "xhigh" if other["effort"] == "max" else other["effort"]
     files[CLAUDE_SETTINGS] = json.dumps(claude_settings, indent=2) + "\n"
     codex = settings["codex"]
-    lines = ["# Written by tools/sync_skills.py from assistant-settings.json. Edit the settings on the workspace page."]
+    config = tomlkit.parse(CODEX_CONFIG.read_text(encoding="utf-8")) if CODEX_CONFIG.exists() else tomlkit.document()
     if codex["model"]:
-        lines.append(f'model = "{codex["model"]}"')
-    lines.append(f'model_reasoning_effort = "{codex["effort"]}"')
-    files[CODEX_CONFIG] = "\n".join(lines) + "\n"
+        config["model"] = codex["model"]
+    else:
+        config.pop("model", None)
+    config["model_reasoning_effort"] = codex["effort"]
+    files[CODEX_CONFIG] = config.as_string()
     return files
 
 
@@ -106,22 +113,14 @@ def out_of_date(settings: dict) -> list[str]:
     files = expected_files(settings)
     stale = [str(p.relative_to(ROOT)) for p, text in files.items()
              if not p.exists() or p.read_text(encoding="utf-8") != text]
-    for folder in (CLAUDE_SKILLS, CODEX_SKILLS):
-        if folder.exists():
-            stale += [str(p.relative_to(ROOT)) for p in folder.rglob("*") if p.is_file() and p not in files]
     return stale
 
 
 def sync(settings: dict) -> None:
     files = expected_files(settings)
-    for folder in (CLAUDE_SKILLS, CODEX_SKILLS):
-        if folder.exists():
-            for path in sorted(folder.rglob("*"), reverse=True):
-                if path.is_file() and path not in files:
-                    path.unlink()
-                elif path.is_dir() and not any(path.iterdir()):
-                    path.rmdir()
     for path, text in files.items():
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 

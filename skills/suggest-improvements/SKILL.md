@@ -5,6 +5,8 @@ description: Look at what reviewers corrected and propose clearer descriptions f
 
 # Suggest improvements from corrections
 
+Resolve the project once at the start. Pin that slug with `INVOICE_PROJECT` on all commands for this task as described in AGENTS.md.
+
 Work from the repository root.
 
 1. Run `./.tools/uv run tools/proposals.py corrections`. It lists every value or rule outcome a reviewer changed, the tips saved with reviews, the differences from the last test invoice run, and proposals still waiting.
@@ -17,6 +19,6 @@ Work from the repository root.
    - Rewrite the whole description so it stays readable, keeping what still holds and adding what the corrections showed. Name the document and where on it to look.
    - Do not propose a change that is already waiting.
 5. Save the list to `projects/<project>/work/proposed-changes.json` and run `./.tools/uv run tools/proposals.py propose <that file>`. Fix any problems it reports.
-6. Reply with a short plain list of what you proposed and why, and ask the person to approve or reject each one under Rules and types on the workspace page. Suggest running the test invoices after approving.
+6. Reply with a short plain list of what you proposed and why, and ask the person to approve or reject each one under Project setup on the workspace page. Suggest running the test invoices after approving.
 
 Do not change fields, types or rules directly. If you see no clear pattern, say so and propose nothing.

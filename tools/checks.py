@@ -15,7 +15,7 @@ import argparse
 import re
 import sys
 
-from common import WorkspaceError, current_project, load_config, load_json, now_iso, print_json, result_path, save_json, set_dirs
+from common import WorkspaceError, current_project, load_config, load_json, now_iso, print_json, set_dirs
 from values import parse_amount, parse_date, plain
 
 FIELD_STATUSES = {"found", "uncertain", "not_found"}
@@ -29,7 +29,9 @@ def validate(result: dict, config: dict) -> list[str]:
     if result.get("type_id") not in type_ids:
         problems.append(f"type_id must be one of {sorted(type_ids)}.")
     known = {f["name"] for f in config["fields"] if f["type_id"] == result.get("type_id")}
-    for name, field in (result.get("fields") or {}).items():
+    if not isinstance(result.get("fields", {}), dict) or not isinstance(result.get("visual", {}), dict):
+        return ["Fields and visual verdicts must be objects."]
+    for name, field in result.get("fields", {}).items():
         if name not in known:
             problems.append(f"Field '{name}' is not defined for type {result.get('type_id')}.")
         if not isinstance(field, dict) or field.get("status") not in FIELD_STATUSES:
@@ -51,7 +53,7 @@ def _box_problems(label: str, item: dict) -> list[str]:
     if (not isinstance(box, list) or len(box) != 4 or not all(isinstance(v, (int, float)) for v in box)
             or not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1)):
         return [f"{label} has an invalid box; use the numbers printed by grid.py finalize."]
-    if not isinstance(item.get("page"), int):
+    if type(item.get("page")) is not int or item["page"] < 1:
         return [f"{label} has a box but no page number."]
     return []
 
@@ -153,40 +155,51 @@ def evaluate(result: dict, config: dict, duplicates: dict[str, list[str]]) -> di
     failed_errors = [o for o in outcomes if o["outcome"] == "failed" and o["severity"] == "error"]
     needs_look = [o for o in outcomes if o["outcome"] == "unclear" or (o["outcome"] == "failed" and o["severity"] != "error")]
     uncertain = [n for n, f in fields.items() if f.get("status") == "uncertain"]
-    if failed_errors:
+    if not rules:
+        status = "no applicable rules"
+    elif failed_errors:
         status = "fails rules"
     elif needs_look or uncertain or result.get("questions"):
         status = "needs a look"
     else:
         status = "passes"
-    return {"rule_results": outcomes, "status": status, "rules_checked_at": now_iso()}
+    return {"rule_results": outcomes, "rules_checked": len(rules), "status": status, "rules_checked_at": now_iso()}
 
 
-def duplicate_index(slug: str, which: str) -> dict[str, list[str]]:
-    _, results_dir = set_dirs(slug, which)
-    index: dict[str, list[str]] = {}
-    if not results_dir.exists():
-        return index
-    for path in results_dir.glob("*.json"):
-        result = load_json(path, {})
-        number = _field_value(final_fields(result), "invoice_number")
-        if number:
-            index.setdefault(plain(number), []).append(path.stem)
-    return {k: v for k, v in index.items() if len(v) > 1}
+def record_for_display(stored: dict | None) -> dict | None:
+    """Read older results without rewriting the files or rerunning current rules."""
+    if stored is None:
+        return None
+    result = {k: v for k, v in stored.items() if k != "pending_recheck"}
+    if "rule_results" in result:
+        result["rules_checked"] = sum(o["rule_id"] != DUPLICATE_RULE for o in result["rule_results"])
+        if not result["rules_checked"]:
+            result["status"] = "no applicable rules"
+    return result
 
 
-def run(slug: str, invoice_id: str, which: str = "invoices") -> dict:
-    path = result_path(slug, invoice_id, which)
-    result = load_json(path)
-    if result is None:
-        raise WorkspaceError(f"There is no result for '{invoice_id}' yet.")
+def checked_result(slug: str, which: str, result: dict) -> dict:
     config = load_config(slug)
     problems = validate(result, config)
     if problems:
         raise WorkspaceError("The result file needs fixing:\n- " + "\n- ".join(problems))
-    result.update(evaluate(result, config, duplicate_index(slug, which)))
-    save_json(path, result)
-    return result
+    # Evaluate the incoming reading in memory. It must not temporarily replace
+    # a confirmed result just to participate in the duplicate-number check.
+    _, results_dir = set_dirs(slug, which)
+    duplicates: dict[str, list[str]] = {}
+    for path in results_dir.glob("*.json"):
+        if path.name.startswith(".") or path.stem == result["invoice"]:
+            continue
+        other = load_json(path)
+        number = _field_value(final_fields(other), "invoice_number")
+        if number:
+            duplicates.setdefault(plain(number), []).append(path.stem)
+    return result | evaluate(result, config, duplicates)
+
+
+def run(slug: str, invoice_id: str, which: str = "invoices") -> dict:
+    from results import recalculate
+    return recalculate(slug, invoice_id, which)
 
 
 def main() -> int:
@@ -200,7 +213,7 @@ def main() -> int:
         slug = current_project()
         if args.all:
             _, results_dir = set_dirs(slug, args.which)
-            ids = sorted(p.stem for p in results_dir.glob("*.json")) if results_dir.exists() else []
+            ids = sorted(p.stem for p in results_dir.glob("*.json") if not p.name.startswith(".")) if results_dir.exists() else []
         elif args.invoice:
             ids = [args.invoice]
         else:

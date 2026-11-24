@@ -1,2 +1,2 @@
-# Written by tools/sync_skills.py from assistant-settings.json. Edit the settings on the workspace page.
+# The workspace settings manage the top-level model and reasoning effort.
 model_reasoning_effort = "medium"

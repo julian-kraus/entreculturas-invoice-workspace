@@ -1,11 +1,7 @@
-# Invoices and everything derived from them stay on this computer
-projects/*/invoices/
-projects/*/results/
-projects/*/work/
-projects/*/evaluation/
-projects/*/guidelines/
-projects/*/history.jsonl
+# Staff-owned data includes rules, tips, identifiers and proposal evidence.
+/projects/
 workspace.json
+/assistant-settings.local.json
 
 __pycache__/
 *.pyc

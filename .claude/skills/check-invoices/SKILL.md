@@ -13,7 +13,7 @@ To look at an image: in Claude Code, Read the PNG file. In Codex, open it with t
 
 ## 1. Load the project
 
-Run `./.tools/uv run tools/project.py show`. Keep in mind:
+Resolve the requested project using `tools/project.py list` and pin its slug with `INVOICE_PROJECT` on every command as described in AGENTS.md. Keep the same project through rendering, checking and saving. Then run `./.tools/uv run tools/project.py show`. Keep in mind:
 - `invoice_types`: description and `what_to_look_for` for each type
 - `fields_by_type`: the fields to read for each type, with hints
 - `confirmed_rules` and `visual_rules_to_judge`: the only rules you apply
@@ -27,7 +27,7 @@ If the person named invoices, check those. Otherwise run `./.tools/uv run tools/
 
 ## 3. For each invoice, one at a time
 
-a. Run `./.tools/uv run tools/pages.py render <invoice>` and look at every page image.
+a. Run `./.tools/uv run tools/pages.py render <invoice>` and look at every page image. Compare any visible project identifiers and funder with the selected project. If the document clearly identifies a different project, ask which one to use before saving. For a question about a single existing finding, inspect the named page and explain the evidence. Save a new check when the person asks for a recheck.
 
 b. Choose the invoice type whose description fits best. Write one sentence on why. If none fits well, pick the closest and add a question.
 
@@ -50,7 +50,7 @@ If a field or rule description was ambiguous for an invoice (for example the bun
 
 ## 5. Report back
 
-Reply in plain words, per invoice: the status, any failed rules, and your questions. Point the person to the workspace page to review the marks and confirm. Do not paste JSON.
+Reply in plain words, per invoice: the status, any failed rules, and your questions. Point the person to the workspace page to review the marks and confirm. Say when no confirmed rules applied. For a staged recheck, explain that the confirmed result remains available until the reviewer accepts the candidate.
 
 ## Limits
 
