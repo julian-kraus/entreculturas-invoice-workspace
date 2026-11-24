@@ -34,7 +34,7 @@ def project(tmp_path, monkeypatch):
         {"id": "R3", "type_id": "VOL", "name": "stamp", "check": "visual", "severity": "error",
          "status": "confirmed", "enabled": True},
         {"id": "R4", "type_id": "VOL", "name": "not yet confirmed", "check": "visual", "severity": "error",
-         "status": "proposed", "enabled": True},
+         "status": "rejected", "enabled": True},
     ])
     common.save_json(base / "learnings.json", [])
     Image.new("RGB", (600, 800), "white").save(base / "invoices" / "receipt-a.png")
@@ -136,6 +136,7 @@ def test_skills_have_frontmatter():
 
 def test_proposals_apply_only_after_approval(project):
     import proposals
+    common.save_json(common.result_path(project, "receipt-a"), {"review": {"status": "confirmed"}})
     ids = proposals.propose(project, [{"kind": "field", "target": "F3", "changes": {"hint": "Use the funds request number."},
                                        "reason": "Reviewers expected the funds request number.", "evidence": ["receipt-a"]}])
     fields = {f["id"]: f for f in common.load_json(common.PROJECTS / project / "fields.json")}
@@ -220,3 +221,29 @@ def test_reversed_rule_requires_reason(project):
             "revision": revision, "status": "draft", "fields": {}, "rules": {"R3": "passed"},
             "rule_reasons": {},
         })
+
+
+def test_improvements_use_confirmed_reviews_only(project):
+    import proposals
+
+    base = common.PROJECTS / project / "results"
+    common.save_json(base / "confirmed.json", {
+        "type_id": "VOLUNTARIOS",
+        "fields": {"total_amount": {"value": "10"}},
+        "review": {"status": "confirmed", "fields": {"total_amount": "20"}},
+        "pending_recheck": {"result": {"review": {"status": "draft", "fields": {"total_amount": "99"}}}},
+    })
+    common.save_json(base / "draft.json", {
+        "type_id": "VOLUNTARIOS",
+        "review": {"status": "draft", "fields": {"total_amount": "30"}},
+    })
+    corrections = proposals.corrections(project)["corrections"]
+    assert [(item["invoice"], item["reviewer"]) for item in corrections] == [("confirmed", "20")]
+
+    proposal = {"kind": "field", "target": "F3", "changes": {"hint": "Use the total."},
+                "reason": "A reviewer corrected the total.", "evidence": ["draft"]}
+    with pytest.raises(common.WorkspaceError, match="confirm the review"):
+        proposals.propose(project, [proposal])
+    assert proposals.pending(project) == []
+    proposal["evidence"] = ["confirmed"]
+    assert proposals.propose(project, [proposal])

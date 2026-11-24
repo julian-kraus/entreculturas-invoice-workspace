@@ -19,8 +19,8 @@ Work from the repository root.
    - Fill `hint` with where to look: which document in the bundle (invoice, receipt, funds request, bank statement) and where on it.
    - Fill `reason` with what in the guideline asks for this, in one sentence.
    - `source` must name the file, the page and, if there is one, the section.
-   - Skip anything already covered by a confirmed rule.
+   - Check existing confirmed, proposed and rejected rules and the rest of this batch. The tool reports matching type and name as skipped, including rejected rules. Tell the person which matches need review before reopening; do not silently drop possible revisions or change rejected rules.
 6. Save the list to `projects/<project>/work/proposed-rules.json` and run `./.tools/uv run tools/rules.py propose <that file>`. Fix any problems it reports.
-7. Reply with a short list of the proposed rules in plain words, and ask the person to review them under Project setup → Inbox. They can edit and confirm one rule or use Confirm all for the displayed items. Proposed rules are not applied until someone confirms them.
+7. Reply with a short list of proposed rules and skipped matches in plain words, and ask the person to review them under Project setup → Inbox. They can edit and confirm one rule or use Confirm all for the displayed items. Proposed rules are not applied until someone confirms them.
 
 Do not change rules that are already confirmed.

@@ -75,6 +75,10 @@ main { padding: 18px 20px 40px; }
 .navigation-list .name { font-weight: 600; overflow-wrap: anywhere; }
 .chevron { font-size: 1.35rem; color: var(--muted); }
 .invoice-list { margin-top: 10px; }
+.invoice-queue { margin: 24px 0; }
+.invoice-queue .section-head { margin-bottom: 6px; }
+.invoice-queue .section-head h3 { margin: 0; }
+.newer-result-notice { background: var(--surface); border-radius: 8px; padding: 12px 16px; }
 .invoice-list button { grid-template-columns: minmax(9rem, 1fr) auto 1rem; }
 .invoice-list button.active { box-shadow: inset 4px 0 0 var(--accent); }
 .tags { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -328,8 +332,6 @@ dialog textarea { width: 100%; }
   .tabs button { padding-inline: 5px; }
 }
 
-.pending-batch { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 14px; margin: 10px 0; background: var(--surface); border-radius: 8px; }
-.pending-batch[hidden] { display: none; }
 
 /* Evidence location editor */
 dialog.mark-editor { max-width: 1000px; width: min(96vw, 1000px); max-height: 94dvh; padding: 20px; }

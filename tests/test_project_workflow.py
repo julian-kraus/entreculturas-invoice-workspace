@@ -62,6 +62,24 @@ def image_upload(name, fmt="PNG"):
     return {"name": name, "data": base64.b64encode(buf.getvalue()).decode()}
 
 
+def test_result_view_uses_separate_page_sets_for_recheck(api):
+    api("/api/project/create", {"name": "Alpha"})
+    api("/api/invoices/upload?project=alpha", image_upload("Receipt.png"))
+    draft = {"type_id": "INVOICE", "fields": {}}
+    results.save("alpha", "receipt", draft)
+    before = api("/api/result/receipt?project=alpha")
+    results.save_review("alpha", "receipt", {"revision": before["revision"], "status": "confirmed"})
+    confirmed = api("/api/result/receipt?project=alpha")
+    source = common.project_dir("alpha") / "invoices" / "receipt.png"
+    Image.new("RGB", (90, 120), "red").save(source)
+    results.save("alpha", "receipt", draft, intent="recheck", expected_revision=confirmed["revision"])
+    detail = api("/api/result/receipt?project=alpha")
+    assert detail["pages"] == confirmed["pages"]
+    assert detail["candidate"]["pages"] != detail["pages"]
+    assert Image.open(BytesIO(api(detail["pages"][0]))).getpixel((0, 0)) == (255, 255, 255)
+    assert Image.open(BytesIO(api(detail["candidate"]["pages"][0]))).getpixel((0, 0)) == (255, 0, 0)
+
+
 def test_review_targets_project_screen_was_opened_in(api):
     draft = {"type_id": "INVOICE", "fields": {"total_amount": {"value": "15", "status": "found"}}}
     for slug in ("alpha", "beta"):
@@ -122,7 +140,8 @@ def test_invoice_export_publishes_effective_findings_and_saved_values(api):
     api(review_url, review | {"status": "confirmed", "revision": results.detail_state("alpha", "receipt")["revision"]})
     confirmed = api(export_url)
     assert confirmed["results"]["review_status"] == "confirmed"
-    assert results.save("alpha", "receipt", initial)["staged"]
+    assert results.save("alpha", "receipt", initial, intent="recheck",
+                        expected_revision=results.detail_state("alpha", "receipt")["revision"])["staged"]
     assert api(export_url) == confirmed
 
 

@@ -769,7 +769,13 @@ function learningsView() {
     el("div", { class: "head" }, el("span", { class: "muted small", text: `${l.id} · from ${l.source_invoice || "manual"} · ${when(l.created)}` })),
     el("label", {}, "Tip", bind(l, "text", el("textarea", { value: l.text || "" }))),
     el("label", { style: "display:flex;gap:6px;align-items:center;color:var(--ink)" }, bind(l, "active", el("input", { type: "checkbox", checked: l.active !== false })), "In use")));
-  return el("div", {}, saveBar("learnings"), el("p", { class: "small muted", text: "Tips saved with reviews. The assistant follows the tips that are in use. Remove or switch off any that cause problems." }),
+  const project = loadedProject;
+  const request = promptButton("Copy improvement request",
+    `Suggest improvements to field, invoice type, or rule descriptions in project "${project}" using confirmed reviews and saved project tips. Propose changes for my review in the Inbox. If there is not enough evidence, say so.`);
+  return el("div", {}, saveBar("learnings"),
+    el("div", { class: "action-row" }, request),
+    el("p", { class: "small muted", text: "Confirm invoice reviews before asking for suggestions. The assistant also uses saved project tips." }),
+    el("p", { class: "small muted", text: "Tips saved with reviews. The assistant follows the tips that are in use. Remove or switch off any that cause problems." }),
     el("div", { class: "cards" }, items.length ? items : el("p", { class: "muted", text: "No tips yet. Add one when you confirm a review." })));
 }
 

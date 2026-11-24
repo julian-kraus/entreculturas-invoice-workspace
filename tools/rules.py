@@ -32,12 +32,12 @@ from common import WorkspaceError, current_project, load_config, load_json, log,
 CHECKS = {"visual", "required", "regex", "range", "enum", "date_in_period"}
 
 
-def propose(slug: str, drafts: list[dict]) -> list[str]:
+def propose(slug: str, drafts: list[dict], *, skipped: list[dict] | None = None) -> list[str]:
     with review_lock(slug):
-        return _propose(slug, drafts)
+        return _propose(slug, drafts, skipped=skipped)
 
 
-def _propose(slug: str, drafts: list[dict]) -> list[str]:
+def _propose(slug: str, drafts: list[dict], *, skipped: list[dict] | None = None) -> list[str]:
     config = load_config(slug)
     type_ids = {t["id"] for t in config["invoice_types"]} | {"ALL"}
     fields = {(f["type_id"], f["name"]) for f in config["fields"]}
@@ -61,8 +61,17 @@ def _propose(slug: str, drafts: list[dict]) -> list[str]:
             problems.append(f"{label}: say where to look on the document (hint).")
     if problems:
         raise WorkspaceError("Fix these before proposing:\n- " + "\n- ".join(problems))
+    existing = {(str(rule.get("type_id", "")), " ".join(str(rule.get("name", "")).split()).casefold()): rule
+                for rule in rules if rule.get("name")}
     number = 1
     for draft in drafts:
+        key = (str(draft.get("type_id", "")), " ".join(str(draft.get("name", "")).split()).casefold())
+        if key[1] and key in existing:
+            if skipped is not None:
+                match = existing[key]
+                skipped.append({"name": draft["name"], "type_id": draft["type_id"],
+                                "matches": match["id"], "status": match.get("status", "proposed")})
+            continue
         while f"P{number:03d}" in taken:
             number += 1
         rule_id = f"P{number:03d}"
@@ -75,8 +84,11 @@ def _propose(slug: str, drafts: list[dict]) -> list[str]:
             "reason": draft.get("reason", ""),
         })
         added.append(rule_id)
-    save_json(path, rules)
-    log(slug, "assistant", "rules proposed", {"rules": added})
+        if key[1]:
+            existing[key] = rules[-1]
+    if added:
+        save_json(path, rules)
+        log(slug, "assistant", "rules proposed", {"rules": added})
     return added
 
 
@@ -88,7 +100,9 @@ def main() -> int:
         drafts = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
         if not isinstance(drafts, list):
             raise WorkspaceError("The draft must be a list of rules.")
-        print_json({"proposed": propose(current_project(), drafts)})
+        skipped = []
+        proposed = propose(current_project(), drafts, skipped=skipped)
+        print_json({"proposed": proposed, "skipped": skipped})
     except json.JSONDecodeError as error:
         print(f"Error: the draft is not valid JSON ({error}).", file=sys.stderr)
         return 1

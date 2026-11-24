@@ -48,7 +48,7 @@ Follow [Backup, update and recovery](#backup-update-and-recovery) before removin
 ## Setting up a project
 
 1. Choose **New project** and enter its name. For AEXCID, choose **Template project**. It includes eight invoice types, 117 fields to extract and 118 proposed rules. You can also start with five standard fields, copy a local project’s types, fields and rules, or import a shared setup.
-2. Add the funder's guidelines in the New project dialog or later under **Project setup → Project details**. The workspace sends added guidelines to Codex using your signed-in plan to propose rules. The chat request is available as a fallback. Proposed rules include the document and page that support them.
+2. Add the funder's guidelines in the New project dialog or later under **Project setup → Project details**. Detection sends readable guideline text, invoice type and field definitions, and existing rules to Codex using your signed-in plan to propose rules. Invoice pages are processed by the assistant used for checking. Proposed rules name the source document and page. For scanned pages without readable text, add a text-readable version or run OCR first.
 3. Open **Inbox** to review proposed rules and description changes. Edit the proposed wording directly in the Inbox. Confirm one item, or use **Confirm all** to review the count and confirm every item matching the invoice-type filter. Confirmed rules appear under **Rules**, where you can filter by invoice type. Rejected items leave the Inbox and their decisions stay in History. An invoice with no applicable project rules is labeled explicitly.
 4. Use **Add invoice type**, **Add field** or **Add a rule** to create an item. **Add** saves it immediately. New rules go to the Inbox for review. Use **Save changes** above an editor to keep changes to existing items. In **Edit rule**, **Done** returns to the rule. After an edit, choose **Save changes** or **Discard**.
 
@@ -68,7 +68,7 @@ Follow [Backup, update and recovery](#backup-update-and-recovery) before removin
 - Setup uses [uv](https://docs.astral.sh/uv/), installed into `.tools/` together with its own Python (see Setup in `AGENTS.md`). Dependencies are in `pyproject.toml` and `uv.lock`.
 - `skills/`: the source of the skills. `./.tools/uv run tools/sync_skills.py` copies them to `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex). Copies are used because Git on Windows often skips symbolic links.
 - `AGENTS.md`: instructions for the assistant. `CLAUDE.md` imports it for Claude Code.
-- `app/`: the workspace page. It listens only on this computer and never calls an AI.
+- `app/`: the workspace page and local server. Project files stay on this computer. Guideline detection starts a separate signed-in Codex run and sends it the readable guideline text and project rule configuration.
 - `tools/import_csv_config.py`: creates a project from the CSV configuration of the earlier invoice agent prototype.
 - Evidence marks: the page image gets a 12 × 16 grid (`tools/grid.py`). The assistant names the cells, refines them on an enlarged 4 × 4 grid and confirms each box on a close-up. Every extracted value with a confirmed location is marked, and boxes the assistant cannot confirm are left out. Reviewers can adjust evidence locations before saving a review.
 
@@ -77,6 +77,8 @@ Follow [Backup, update and recovery](#backup-update-and-recovery) before removin
 Download **confirmed rules ZIP** under **Settings → Export** to share the rules and their invoice type and field context. In another workspace, give the ZIP to the assistant and ask it to import shared rules into the intended project. Matching rules are skipped, new rules enter the Inbox for review, and the importer reports any missing invoice type or field dependencies.
 
 You can add invoices and funder guidelines in the website or give the files to the assistant in chat. Ask it to add them to the intended project, then request the check or rule proposal.
+
+To suggest improvements from review corrections, confirm the relevant invoice reviews first. Under **Project setup → Tips from corrections**, use **Copy improvement request** and paste it into the project chat. The assistant uses confirmed corrections and saved project tips, then places any proposed changes in the Inbox for a person to review.
 
 ## Product direction
 

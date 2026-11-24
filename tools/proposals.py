@@ -26,7 +26,7 @@ from pathlib import Path
 
 from review_lock import review_lock
 from common import (
-    WorkspaceError, current_project, load_config, load_json, log, now_iso, print_json, project_dir, save_json,
+    WorkspaceError, current_project, load_config, load_json, log, now_iso, print_json, project_dir, result_path, save_json,
 )
 
 EDITABLE = {
@@ -71,6 +71,17 @@ def _propose(slug: str, drafts: list[dict], who: str = "assistant") -> list[str]
         if not str(draft.get("reason", "")).strip():
             problems.append(f"{label}: say why, in one plain sentence.")
             continue
+        evidence = draft.get("evidence", [])
+        if not isinstance(evidence, list) or any(not isinstance(item, str) for item in evidence):
+            problems.append(f"{label}: evidence must be a list of reviewed invoice IDs.")
+            continue
+        for invoice_id in evidence:
+            try:
+                result = load_json(result_path(slug, invoice_id), {}) or {}
+            except WorkspaceError:
+                result = {}
+            if (result.get("review") or {}).get("status") != "confirmed":
+                problems.append(f"{label}: confirm the review of '{invoice_id}' before using it as evidence.")
         before = {k: items[target].get(k) for k in changes}
         if before == changes:
             problems.append(f"{label}: this is already the current value.")
@@ -145,6 +156,8 @@ def corrections(slug: str) -> dict:
     for result_file in sorted(results_dir.glob("*.json")) if results_dir.exists() else []:
         result = load_json(result_file, {})
         review = result.get("review") or {}
+        if review.get("status") != "confirmed":
+            continue
         original = (result.get("ai_original") or result).get("fields", {})
         for name, value in (review.get("fields") or {}).items():
             field_id, label = labels.get((result.get("type_id"), name), (None, name))

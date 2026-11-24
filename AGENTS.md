@@ -18,7 +18,7 @@ This folder helps a non-technical team check invoices for grant justification. P
 - **Yes, through the tools:** results (`tools/results.py`), proposed rules (`tools/rules.py`), proposed changes to descriptions (`tools/proposals.py`) and the selected project (`tools/project.py`).
 - **Only when the person asks for it explicitly:** invoice types, fields, rules, learnings and project details. Prefer pointing them to the page, where changes are logged with before and after. If you edit these files directly, describe the change and log it with `common.log` in the same way.
 - **Not without a clear request and a confirmation:** anything in `tools/`, `app/`, `skills/` or this file. If the person asks for such a change, explain what you would change and why, make the change and run `./.tools/uv run pytest tests` and `./.tools/uv run tools/sync_skills.py`.
-- **Never:** delete invoices, results or history; send data anywhere outside this computer; push to a remote repository.
+- **Never:** delete invoices, results or history; send data to an unrelated destination; push to a remote repository without a clear request. Project files are stored locally. When guideline detection runs, it sends readable guideline text, invoice type and field definitions, and existing rules to Codex using the signed-in account. Invoice checking processes invoice pages through the assistant the person uses for the task.
 
 ## Where things are
 

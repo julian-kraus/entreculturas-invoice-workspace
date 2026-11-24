@@ -200,7 +200,7 @@ def record_for_display(stored: dict | None) -> dict | None:
     """Read older results without rewriting the files or rerunning current rules."""
     if stored is None:
         return None
-    result = {k: v for k, v in stored.items() if k != "pending_recheck"}
+    result = {k: v for k, v in stored.items() if k not in ("pending_recheck", "_pending_effects")}
     if "rule_results" in result:
         result["rule_results"] = reviewed_findings(result, result["rule_results"])
         result["rules_checked"] = sum(o["rule_id"] != DUPLICATE_RULE for o in result["rule_results"])
@@ -221,7 +221,12 @@ def checked_result(slug: str, result: dict) -> dict:
     for path in results_dir.glob("*.json"):
         if path.name.startswith(".") or path.stem == result["invoice"]:
             continue
-        other = load_json(path)
+        try:
+            other = load_json(path)
+        except (ValueError, OSError) as error:
+            raise WorkspaceError(f"Cannot check duplicate invoice numbers because result '{path.name}' cannot be read. Resolve it before checking.") from error
+        if not isinstance(other, dict):
+            raise WorkspaceError(f"Cannot check duplicate invoice numbers because result '{path.name}' is invalid. Resolve it before checking.")
         number = _field_value(final_fields(other), "invoice_number")
         if number:
             duplicates.setdefault(plain(number), []).append(path.stem)
@@ -250,7 +255,13 @@ def main() -> int:
             raise WorkspaceError("Say which invoice, or use --all.")
         summary = []
         for invoice_id in ids:
-            result = run(slug, invoice_id)
+            try:
+                result = run(slug, invoice_id)
+            except WorkspaceError as error:
+                if not args.all:
+                    raise
+                summary.append({"invoice": invoice_id, "error": str(error)})
+                continue
             summary.append({
                 "invoice": invoice_id, "status": result["status"],
                 "failed": [o["rule_id"] for o in result["rule_results"] if o["outcome"] == "failed"],

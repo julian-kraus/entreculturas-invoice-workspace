@@ -2,7 +2,7 @@ import {
   api, clone, confirmLeave, copyText, el, hasUnsavedChanges, notify, setSelectOptions, state, uploadFiles, uploadSummary, startRuleDetection, refreshRuleDetection
 } from "./workspace.js";
 import {
-  backToList, clearInvoices, displayInvoiceView, loadInvoices, selectInvoice
+  backToList, clearInvoices, displayInvoiceView, invalidateInvoiceRequests, loadInvoices, selectInvoice
 } from "./invoice-review.js";
 import {
   clearSetup, loadSetup, renderSetup
@@ -11,6 +11,20 @@ import {
   loadHistory, loadSettings
 } from "./workspace-tools.js";
 import { loadExports, openInvoiceExport } from "./workspace-exports.js";
+import { loadInvoiceRulesStatus } from "./invoice-rules-status.js";
+
+async function openInvoiceRules(kind, typeId = "") {
+  await showTab("setup");
+  if (state.tab !== "setup") return;
+  if (kind === "inbox" && document.querySelector('[data-sub="inbox"]').hidden) {
+    notify("The Inbox has already been handled.");
+    kind = "rules";
+  }
+  state.setupSub = kind;
+  state.typeFilter = typeId || "";
+  renderSetup();
+  document.querySelector(`[data-sub="${kind}"]`)?.focus();
+}
 
 function updateStartingSetup() {
   const source = document.querySelector('[name="starting-setup"]:checked').value;
@@ -83,6 +97,7 @@ async function showTab(tab, force = false) {
   }
   if (!force && !(await confirmLeave())) return;
   if (tab !== state.tab) {
+    if (state.tab === "invoices") invalidateInvoiceRequests();
     state.setupDirty = false;
     state.reviewDirty = false;
     state.settingsDirty = false;
@@ -101,6 +116,7 @@ async function showTab(tab, force = false) {
   if (tab === "invoices") {
     displayInvoiceView(Boolean(state.selected));
     if (await loadInvoices() && state.selected) await selectInvoice(state.selected, true);
+    void loadInvoiceRulesStatus(state.current, openInvoiceRules);
   }
   if (tab === "setup") await loadSetup();
 }
@@ -124,6 +140,12 @@ async function showSettingsSub(sub, force = false) {
 
 // ---------- start ----------
 function wire() {
+  document.getElementById("invoice-detail").addEventListener("review-inbox", () => {
+    openInvoiceRules("inbox").catch(error => notify(error.message, true));
+  });
+  document.getElementById("invoice-detail").addEventListener("review-rules", event => {
+    openInvoiceRules("rules", event.detail.typeId).catch(error => notify(error.message, true));
+  });
   document.getElementById("invoice-detail").addEventListener("click", async (event) => {
     const exportAction = event.target.closest("[data-export-invoice]");
     if (exportAction) { openInvoiceExport(exportAction); return; }
@@ -283,10 +305,6 @@ function wire() {
   const drop = document.getElementById("invoice-drop");
   const input = document.getElementById("invoice-upload");
   drop.addEventListener("click", () => input.click());
-  document.getElementById("pending-copy").addEventListener("click", () => {
-    const ids = state.invoices.filter(i => !i.checked_at).map(i => i.id);
-    if (ids.length) copyText(`Check these invoices in project "${state.current}": ${ids.map(id => JSON.stringify(id)).join(", ")}. Use the confirmed rules for that project.`, "Check request copied. Paste it into your project chat.");
-  });
   input.addEventListener("change", async () => {
     await addInvoices(input.files);
     input.value = "";
@@ -305,15 +323,23 @@ async function addInvoices(files, previous = []) {
   const results = await uploadFiles(files, "/api/invoices/upload", project);
   if (!results.length || state.current !== project) return;
   const allResults = [...previous, ...results];
-  document.getElementById("invoice-upload-results").replaceChildren(uploadSummary(allResults,
-    failed => addInvoices(failed, allResults.filter(result => !result.error))));
+  const feedback = document.getElementById("invoice-upload-results");
+  if (allResults.some(result => result.error)) {
+    feedback.replaceChildren(uploadSummary(allResults,
+      failed => addInvoices(failed, allResults.filter(result => !result.error))));
+  } else {
+    feedback.replaceChildren();
+    notify(`${allResults.length} invoice${allResults.length === 1 ? "" : "s"} added.`);
+  }
   if (results.some(result => !result.error)) await loadInvoices();
 }
 
 async function poll() {
   if (document.hidden || !state.current || state.tab !== "invoices") return;
-  await loadInvoices({ poll: true });
+  await Promise.all([loadInvoices({ poll: true }), loadInvoiceRulesStatus(state.current, openInvoiceRules)]);
 }
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden) void poll(); });
 
 (async () => {
   wire();

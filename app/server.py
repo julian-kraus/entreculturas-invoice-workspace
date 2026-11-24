@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import results as result_store  # noqa: E402
 import detect_rules  # noqa: E402
 from common import (  # noqa: E402
-    INVOICE_SUFFIXES, PROJECTS, WorkspaceError, check_id, selected_project, existing_project, invoice_display_name, invoice_files, list_projects,
+    INVOICE_SUFFIXES, PROJECTS, WorkspaceError, ambiguous_invoice_ids, check_id, selected_project, existing_project, invoice_display_name, invoice_files, list_projects,
     load_config, load_json, log, now_iso, project_dir, read_history, result_path, save_json,
     set_current_project, storage_slug, work_dir,
 )
@@ -91,14 +91,29 @@ def describe_changes(before, after) -> dict:
 
 def invoice_list(slug: str) -> list[dict]:
     items = []
+    ambiguous = ambiguous_invoice_ids(slug)
     for invoice_id, path in invoice_files(slug).items():
-        stored = load_json(result_path(slug, invoice_id))
+        result_file = result_path(slug, invoice_id)
+        try:
+            stored = load_json(result_file)
+            if result_file.exists() and not isinstance(stored, dict):
+                raise ValueError("Invalid result")
+            result_error = False
+        except (ValueError, OSError):
+            stored = None
+            result_error = True
         result = result_store.record_for_display(stored) if stored else None
         review = (result or {}).get("review") or {}
+        candidate = (stored or {}).get("pending_recheck") or {}
         items.append({
             "id": invoice_id, "file": invoice_display_name(slug, invoice_id, source=path),
             "revision": result_store.revision(result) if result else None,
-            "pending_recheck": ((stored or {}).get("pending_recheck") or {}).get("revision"),
+            "pending_recheck": candidate.get("revision"),
+            "candidate_origin": candidate.get("origin"),
+            "has_result": result_file.exists(),
+            "result_error": result_error or invoice_id in ambiguous,
+            "identity_error": invoice_id in ambiguous,
+            "review_status": review.get("status"),
             "status": (result or {}).get("status", "not checked"),
             "checked_at": (result or {}).get("checked_at"),
             "summary": (result or {}).get("summary", ""),
@@ -107,15 +122,12 @@ def invoice_list(slug: str) -> list[dict]:
     return items
 
 
-def page_images(slug: str, invoice_id: str) -> list[str]:
-    folder = work_dir(slug, invoice_id)
-    pages = sorted((p for p in folder.glob("page-*.png") if p.stem.count("-") == 1),
-                   key=lambda p: int(p.stem.split("-")[1])) if folder.exists() else []
-    if not pages:
-        render(slug, invoice_id)
-        pages = sorted((p for p in folder.glob("page-*.png") if p.stem.count("-") == 1),
-                       key=lambda p: int(p.stem.split("-")[1]))
-    return [file_url(p, slug) for p in pages]
+def page_images(slug: str, invoice_id: str, result: dict | None = None) -> tuple[list[str], str | None]:
+    try:
+        pages = render(slug, invoice_id, (result or {}).get("source_digest"))
+        return [file_url(p["path"], slug) for p in pages], None
+    except WorkspaceError as error:
+        return [], str(error)
 
 
 def file_url(path: Path | str, slug: str, *, download: bool = False) -> str:
@@ -381,7 +393,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self.send_file(APP / "index.html")
         if path in ("/app.js", "/app.css", "/workspace.js", "/invoice-review.js", "/project-setup.js",
-                    "/workspace-tools.js", "/workspace-exports.js"):
+                    "/workspace-tools.js", "/workspace-exports.js", "/invoice-rules-status.js"):
             return self.send_file(APP / path.lstrip("/"))
         if path.startswith("/files/"):
             target = (ROOT / path[len("/files/"):]).resolve()
@@ -420,10 +432,13 @@ class Handler(BaseHTTPRequestHandler):
             candidate = detail.get("candidate")
             if candidate:
                 candidate["marks"] = marks_for(candidate["result"])
+                candidate["pages"], candidate["pages_error"] = page_images(slug, invoice_id, candidate["result"])
             pdf = detail.get("marked_pdf")
             url = file_url(pdf, slug, download=True) if pdf else None
+            pages, pages_error = page_images(slug, invoice_id, result)
             return self.send_json({**detail, "marked_pdf": url, "marked_pdf_url": url,
-                                   "pages": page_images(slug, invoice_id), "marks": marks_for(result) if result else []})
+                                   "pages": pages, "pages_error": pages_error,
+                                   "marks": marks_for(result) if result else []})
         if path == "/api/proposals":
             rules = [r for r in load_config(slug)["rules"] if r.get("status") == "proposed"]
             return self.send_json({"changes": pending_proposals(slug), "rules": rules})
@@ -523,6 +538,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/result/") and path.endswith("/accept-recheck"):
             invoice_id = check_id(path.split("/")[3], "invoice")
             return self.send_json({"result": result_store.accept_recheck(slug, invoice_id, body)})
+        if path.startswith("/api/result/") and path.endswith("/discard-candidate"):
+            invoice_id = check_id(path.split("/")[3], "invoice")
+            return self.send_json({"result": result_store.discard_candidate(slug, invoice_id, body)})
         if path == "/api/report":
             report = build_report(slug, who="staff")
             return self.send_json({"report": report, "url": file_url(report, slug, download=True)})

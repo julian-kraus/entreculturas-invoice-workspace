@@ -108,7 +108,7 @@ def _run_once(slug):
             if path.is_file() and path.suffix.lower() in (".pdf", ".txt", ".md"):
                 pages = read_text(slug, path.name, None)
                 if not pages or not all(page["text"].strip() for page in pages):
-                    raise WorkspaceError(f"{path.name} contains pages without readable text. Use the chat request to inspect scanned pages.")
+                    raise WorkspaceError(f"{path.name} contains pages without readable text. Add a text-readable version or OCR the document before checking rules.")
                 documents.append({"file": path.name, "pages": pages})
         config = load_config(slug)
         payload = json.dumps({"guidelines": documents, "invoice_types": config["invoice_types"],
@@ -149,16 +149,13 @@ def _run_once(slug):
             if current_files != {doc["file"] for doc in documents} or any(
                     read_text(slug, doc["file"], None) != doc["pages"] for doc in documents):
                 return {"status": "running", "changed": True}
-            existing = {(str(rule.get("type_id", "")), str(rule.get("name", "")).strip().casefold())
-                        for rule in load_config(slug)["rules"]}
-            unique = []
-            for draft in drafts:
-                key = (draft["type_id"], draft["name"].strip().casefold())
-                if key not in existing:
-                    unique.append(draft)
-                    existing.add(key)
-            ids = _propose(slug, unique) if unique else []
-        state = {"status": "completed", "message": f"{len(ids)} rules proposed. Review them in the Inbox.", "count": len(ids)}
+            skipped = []
+            ids = _propose(slug, drafts, skipped=skipped) if drafts else []
+        message = f"{len(ids)} rules proposed. Review them in the Inbox."
+        if skipped:
+            names = ", ".join(f"{item['name']} ({item['status']})" for item in skipped)
+            message += f" Skipped matching rules: {names}. Review their existing decisions before reopening."
+        state = {"status": "completed", "message": message, "count": len(ids), "skipped": skipped}
     except Exception as error:
         message = str(error) if isinstance(error, WorkspaceError) else "Rule detection could not complete. Try again or use the chat request."
         state = {"status": "failed", "message": message}

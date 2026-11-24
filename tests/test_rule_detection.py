@@ -8,7 +8,22 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import common
 import detect_rules
+import rules
 from project import create
+
+
+def test_manual_proposals_report_matches_across_statuses_and_batch(tmp_path, monkeypatch):
+    monkeypatch.setattr(common, "PROJECTS", tmp_path / "projects")
+    slug = create("Matches", None)
+    path = common.project_dir(slug) / "rules.json"
+    common.save_json(path, [{"id": "P001", "name": "Date present", "type_id": "ALL", "status": "rejected"}])
+    base = {"name": " date   PRESENT ", "description": "Include a date.", "hint": "Invoice",
+            "type_id": "ALL", "source": "source.txt, page 1", "check": "visual"}
+    fresh = base | {"name": "Signature present"}
+    skipped = []
+    assert len(rules.propose(slug, [base, fresh, fresh], skipped=skipped)) == 1
+    assert [item["status"] for item in skipped] == ["rejected", "proposed"]
+    assert len(common.load_json(path)) == 2
 
 
 def test_detection_validates_citations_and_reserves_project(tmp_path, monkeypatch):

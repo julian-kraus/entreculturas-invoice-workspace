@@ -9,12 +9,12 @@ Resolve the project once at the start. Pin that slug with `INVOICE_PROJECT` on a
 
 Work from the repository root.
 
-1. Run `./.tools/uv run tools/proposals.py corrections`. It lists every value or rule outcome a reviewer changed, the tips saved with reviews, and proposals still waiting.
+1. Run `./.tools/uv run tools/proposals.py corrections`. It lists corrections from confirmed reviews, the saved project tips, and proposals still waiting. Draft reviews and pending rechecks are excluded. If there are no confirmed corrections and no relevant tips, explain that there is not enough reviewed evidence and stop.
 2. Run `./.tools/uv run tools/project.py show` to see the current descriptions, and read `projects/<project>/fields.json`, `invoice_types.json` and `rules.json` for the ids and current text of what you want to change.
 3. Look for patterns, not single slips. Good reasons to propose a change:
    - the same field was corrected on two or more invoices, or on one invoice where the cause is clearly a vague description (for example two documents in the bundle each have a number)
    - a tip says the same thing a description should say
-4. For each pattern, write one change in the format shown by `./.tools/uv run tools/proposals.py` (run it without arguments): the item's `kind` and `target` id, the new text in `changes`, a one-sentence `reason` a non-technical reviewer understands, and the invoices it is based on in `evidence`.
+4. For each pattern, write one change in the format shown by `./.tools/uv run tools/proposals.py` (run it without arguments): the item's `kind` and `target` id, the new text in `changes`, a one-sentence `reason` a non-technical reviewer understands, and the confirmed-review invoice IDs it is based on in `evidence`. For a proposal based only on a saved project tip, leave `evidence` empty and identify the tip in the reason.
    - Rewrite the whole description so it stays readable, keeping what still holds and adding what the corrections showed. Name the document and where on it to look.
    - Do not propose a change that is already waiting.
 5. Save the list to `projects/<project>/work/proposed-changes.json` and run `./.tools/uv run tools/proposals.py propose <that file>`. Fix any problems it reports.

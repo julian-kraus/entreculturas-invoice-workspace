@@ -12,7 +12,7 @@ import sys
 
 import pypdfium2
 
-from common import WorkspaceError, current_project, print_json, project_dir
+from common import PDFIUM_LOCK, WorkspaceError, current_project, print_json, project_dir
 
 
 def folder(slug: str):
@@ -38,16 +38,17 @@ def read_text(slug: str, name: str, pages: str | None) -> list[dict]:
         return [{"page": 1, "text": path.read_text(encoding="utf-8")}]
     if path.suffix.lower() != ".pdf":
         raise WorkspaceError("Guidelines can be PDF or plain text files.")
-    document = pypdfium2.PdfDocument(str(path))
-    try:
-        out = []
-        for number in parse_pages(pages, len(document)):
-            textpage = document[number - 1].get_textpage()
-            out.append({"page": number, "text": textpage.get_text_range().strip()})
-            textpage.close()
-        return out
-    finally:
-        document.close()
+    with PDFIUM_LOCK:
+        document = pypdfium2.PdfDocument(str(path))
+        try:
+            out = []
+            for number in parse_pages(pages, len(document)):
+                textpage = document[number - 1].get_textpage()
+                out.append({"page": number, "text": textpage.get_text_range().strip()})
+                textpage.close()
+            return out
+        finally:
+            document.close()
 
 
 def main() -> int:

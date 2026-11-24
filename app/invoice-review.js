@@ -1,5 +1,5 @@
 import {
-  api, askConfirm, button, confirmLeave, el, notify, pill, projectUrl, promptButton, state, when
+  api, askConfirm, button, confirmLeave, copyText, el, notify, pill, projectUrl, promptButton, state, when
 } from "./workspace.js";
 
 const STATUS_LABEL = {
@@ -14,25 +14,69 @@ const OUTCOME_LABEL = { passed: "Passed", failed: "Failed", unclear: "Unclear", 
 let invoiceScope = 0;
 let loadedProject = null;
 let loadingRequest = null;
+let editingCandidate = false;
+let inboxStatus = { project: null, count: null };
+
+function updateCheckButtons(project, count) {
+  inboxStatus = { project, count };
+  document.querySelectorAll("[data-check-request]").forEach(control => {
+    if (control.dataset.checkProject !== project) return;
+    control.textContent = count ? "Review Inbox before checking" : control.dataset.checkLabel;
+  });
+  document.querySelectorAll("[data-check-hint]").forEach(hint => {
+    if (hint.dataset.checkProject !== project) return;
+    hint.textContent = count ? "Handle the Inbox items before checking invoices." :
+      "Paste the request into your project chat to start the checks. Invoice pages are processed by the assistant you use in that chat.";
+  });
+}
+
+document.addEventListener("invoice-inbox-status", event => {
+  if (event.detail.project === state.current) updateCheckButtons(event.detail.project, event.detail.count);
+});
+
+function guardedCheckButton(label, request, project, scope, style = "ghost") {
+  const control = button(label, async () => {
+    try {
+      const proposals = await api("GET", "/api/proposals", undefined, project);
+      if (!control.isConnected || !currentInvoiceScope(project, scope)) return;
+      const count = proposals.rules.length + proposals.changes.length;
+      updateCheckButtons(project, count);
+      if (count) {
+        document.getElementById("invoice-detail").dispatchEvent(new CustomEvent("review-inbox"));
+        return;
+      }
+      await copyText(request, "Request copied. Paste it into your project chat to start the checks.");
+    } catch (error) { notify(`Could not check the Inbox: ${error.message}`, true); }
+  }, style);
+  control.dataset.checkRequest = "";
+  control.dataset.checkProject = project;
+  control.dataset.checkLabel = label;
+  if (inboxStatus.project === project && inboxStatus.count) control.textContent = "Review Inbox before checking";
+  return control;
+}
+const reviewResult = () => editingCandidate ? state.detail.candidate.result : state.detail.result;
 
 function currentInvoiceScope(project, scope) {
   return project && project === state.current && scope === invoiceScope && state.tab === "invoices";
 }
 
-export function clearInvoices() {
+export function invalidateInvoiceRequests() {
   invoiceScope++;
   loadedProject = null;
   loadingRequest = null;
-  Object.assign(state, { invoices: [], selected: null, detail: null, listScroll: 0 });
   state.detailRequest++;
+}
+
+export function clearInvoices() {
+  invalidateInvoiceRequests();
+  loadedProject = null;
+  loadingRequest = null;
+  Object.assign(state, { invoices: [], selected: null, detail: null, listScroll: 0 });
   displayInvoiceView(false);
   document.getElementById("invoice-detail").replaceChildren();
   document.getElementById("invoice-count").textContent = "";
   document.getElementById("invoice-list").replaceChildren();
-  const batch = document.getElementById("pending-batch");
-  batch.hidden = true;
-  document.getElementById("pending-copy").disabled = true;
-  document.getElementById("pending-summary").textContent = "";
+  document.getElementById("invoice-rules-status").replaceChildren();
 }
 
 export async function loadInvoices({ poll = false } = {}) {
@@ -46,7 +90,7 @@ export async function loadInvoices({ poll = false } = {}) {
   const previous = state.invoices;
   const selected = state.selected;
   if (!poll && loadedProject !== project) {
-    list.replaceChildren(el("li", { class: "empty", role: "status", text: "Loading invoices…" }));
+    list.replaceChildren(el("p", { class: "empty", role: "status", text: "Loading invoices…" }));
   }
   try {
     const invoices = await api("GET", "/api/invoices", undefined, project);
@@ -56,10 +100,19 @@ export async function loadInvoices({ poll = false } = {}) {
       loadedProject = project;
       renderInvoiceList(project, scope);
     }
-    const selectedItem = items => items.find(invoice => invoice.id === selected);
-    if (poll && selected && selected === state.selected && !state.reviewDirty &&
-        JSON.stringify(selectedItem(invoices)) !== JSON.stringify(selectedItem(previous))) {
-      await selectInvoice(selected, true, project);
+    const selectedItem = invoices.find(invoice => invoice.id === selected);
+    if (poll && selected && selected === state.selected && state.detail) {
+      const changed = selectedItem && (selectedItem.revision !== state.detail.revision ||
+        selectedItem.pending_recheck !== (state.detail.candidate?.revision || null));
+      if (changed && state.reviewDirty) {
+        const detail = document.getElementById("invoice-detail");
+        if (!detail.querySelector(".newer-result-notice")) {
+          detail.prepend(el("p", { class: "newer-result-notice", role: "status",
+            text: "A newer saved version is available. Your edits are still here; review the latest version before saving." }));
+        }
+      } else if (changed) {
+        await selectInvoice(selected, true, project);
+      }
     }
     return current();
   } catch (error) {
@@ -68,7 +121,7 @@ export async function loadInvoices({ poll = false } = {}) {
       const retry = button("Try again", () => {
         if (currentInvoiceScope(project, scope)) return loadInvoices();
       });
-      list.replaceChildren(el("li", { class: "empty" },
+      list.replaceChildren(el("div", { class: "empty" },
         el("p", { role: "status", text: "Could not load invoices for this project." }), retry));
     } else if (!poll) {
       notify(error.message, true);
@@ -100,27 +153,57 @@ export async function backToList() {
 }
 
 function renderInvoiceList(project, scope) {
-  const pending = state.invoices.filter(i => !i.checked_at);
-  document.getElementById("invoice-count").textContent = `${state.invoices.length} total`;
-  document.getElementById("pending-batch").hidden = !pending.length;
-  document.getElementById("pending-copy").disabled = !pending.length;
-  document.getElementById("pending-copy").textContent = pending.length === 1 ? "Copy check request" : "Copy check request for all";
-  document.getElementById("pending-summary").textContent = `${pending.length} pending invoice${pending.length === 1 ? "" : "s"}`;
   const list = document.getElementById("invoice-list");
   const focused = list.contains(document.activeElement) ? document.activeElement.dataset.invoiceId : null;
   if (!state.invoices.length) {
-    list.replaceChildren(el("li", { class: "empty", text: "Add your first invoice to start a check." }));
+    document.getElementById("invoice-count").textContent = "No invoices yet.";
+    list.replaceChildren(el("p", { class: "empty", text: "Add an invoice, then copy the check request into your project chat." }));
     return;
   }
-  list.replaceChildren(...state.invoices.map(inv => el("li", {},
+  const groups = [
+    { key: "review", name: "Needs review", items: state.invoices.filter(i => i.result_error || i.pending_recheck || (i.has_result && i.review_status !== "confirmed")) },
+    { key: "pending", name: "To check", items: state.invoices.filter(i => !i.has_result && !i.result_error) },
+    { key: "confirmed", name: "Confirmed", items: state.invoices.filter(i => i.has_result && !i.result_error && !i.pending_recheck && i.review_status === "confirmed") },
+  ];
+  const summary = `${state.invoices.length} total · ${groups[0].items.length} need review · ${groups[1].items.length} to check`;
+  const count = document.getElementById("invoice-count");
+  if (count.textContent !== summary) count.textContent = summary;
+  const row = inv => {
+    let action = "Open invoice";
+    if (inv.identity_error) action = "Invoice identity needs attention";
+    else if (inv.result_error) action = "Result could not be read";
+    else if (inv.pending_recheck) action = inv.candidate_origin === "staff_draft" ? "Continue draft" :
+      ["assistant_recheck", "rule_recalculation"].includes(inv.candidate_origin) ? "Compare recheck" : "Review pending change";
+    else if (!inv.has_result) action = "Not checked";
+    else if (inv.review_status === "draft") action = "Continue review";
+    else if (inv.review_status !== "confirmed") action = "Review";
+    return el("li", {},
     el("button", { type: "button", "data-invoice-id": inv.id, onclick: () => {
+      if (inv.identity_error) {
+        notify("These files have the same name and their saved result cannot be identified. Restore the result from a backup before checking them.", true);
+        return;
+      }
       if (currentInvoiceScope(project, scope)) return selectInvoice(inv.id, false, project);
     } },
       el("span", { class: "name", text: inv.file }),
-      el("span", { class: "tags" }, pill(STATUS_LABEL[inv.status] || inv.status, inv.status),
-        inv.reviewed ? pill("Reviewed", "reviewed") : null,
-        inv.pending_recheck ? pill("Recheck awaiting review", "unclear") : null),
-      el("span", { class: "chevron", "aria-hidden": true, text: "›" })))));
+      el("span", { class: "tags" }, inv.has_result && !inv.result_error ? pill(STATUS_LABEL[inv.status] || inv.status, inv.status) : null,
+        inv.pending_recheck && inv.reviewed ? pill("Confirmed result", "reviewed") : null,
+        el("span", { class: "muted small", text: action })),
+      el("span", { class: "chevron", "aria-hidden": true, text: "›" })));
+  };
+  list.replaceChildren(...groups.map(group => {
+    const copy = group.key === "pending" && group.items.length ? guardedCheckButton(
+      group.items.length === 1 ? "Copy check request" : `Copy request for ${group.items.length}`,
+      `Check these invoices in project "${project}" only if they are still unchecked: ${group.items.map(invoice => JSON.stringify(invoice.id)).join(", ")}. Use the confirmed rules for that project.`,
+      project, scope, "primary") : null;
+    return el("section", { class: "invoice-queue", "aria-label": group.name },
+      el("div", { class: "section-head" }, el("h3", { text: `${group.name} · ${group.items.length}` }), copy),
+      copy ? el("p", { class: "muted small", "data-check-hint": "", "data-check-project": project,
+        text: inboxStatus.project === project && inboxStatus.count ? "Handle the Inbox items before checking invoices." :
+          "Paste the request into your project chat to start the checks. Invoice pages are processed by the assistant you use in that chat." }) : null,
+      group.items.length ? el("ul", { class: "navigation-list invoice-list" }, group.items.map(row)) :
+        el("p", { class: "muted small", text: `No invoices ${group.key === "pending" ? "to check" : group.key === "review" ? "need review" : "confirmed yet"}.` }));
+  }));
   if (focused) list.querySelector(`[data-invoice-id="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
 }
 
@@ -141,6 +224,7 @@ export async function selectInvoice(id, refresh = false, project = state.current
   const request = ++state.detailRequest;
   const current = () => request === state.detailRequest && state.selected === id && currentInvoiceScope(project, scope);
   if (!refresh) {
+    editingCandidate = false;
     state.listScroll = window.scrollY;
     state.reviewView = "findings";
     state.reviewDirty = false;
@@ -174,25 +258,46 @@ function confirmedValue(result, name) {
 function candidatePanel(official, candidate, project, invoiceId) {
   const proposed = candidate.result;
   const differences = [];
-  const fieldNames = new Set([...Object.keys(official.fields || {}), ...Object.keys(proposed.fields || {}), ...Object.keys(official.review?.fields || {})]);
+  const fieldNames = new Set([...Object.keys(official.fields || {}), ...Object.keys(proposed.fields || {}),
+    ...Object.keys(official.review?.fields || {}), ...Object.keys(proposed.review?.fields || {})]);
   const fieldLabel = name => state.config.fields.find(f => f.name === name && f.type_id === proposed.type_id)?.label || name;
   const add = (label, oldValue, newValue) => {
     if (String(oldValue ?? "") !== String(newValue ?? "")) differences.push([label, oldValue ?? "—", newValue ?? "—"]);
   };
   add("Invoice type", official.type_id, proposed.type_id);
   add("Status", official.status, proposed.status);
-  for (const name of fieldNames) add(fieldLabel(name), confirmedValue(official, name), confirmedValue(proposed, name));
+  add("Classification reason", official.type_reason, proposed.type_reason);
+  add("Summary", official.summary, proposed.summary);
+  add("Questions", JSON.stringify(official.questions || []), JSON.stringify(proposed.questions || []));
+  add("Review note", official.review?.note, proposed.review?.note);
+  const location = value => value?.page && value?.box ? `Page ${value.page}, box ${JSON.stringify(value.box)}` : "No location";
+  for (const name of fieldNames) {
+    add(fieldLabel(name), confirmedValue(official, name), confirmedValue(proposed, name));
+    add(`${fieldLabel(name)} · evidence`,
+      location(official.review?.evidence?.fields?.[name] || official.fields?.[name]),
+      location(proposed.review?.evidence?.fields?.[name] || proposed.fields?.[name]));
+  }
   const previous = new Map((official.rule_results || []).map(rule => [rule.rule_id, rule]));
   for (const rule of proposed.rule_results || []) {
     const old = previous.get(rule.rule_id);
     add(rule.name, old ? OUTCOME_LABEL[old.outcome] : null, OUTCOME_LABEL[rule.outcome]);
     add(`${rule.name} · reason`, old?.message, rule.message);
+    add(`${rule.name} · evidence`,
+      location(official.review?.evidence?.rules?.[rule.rule_id] || old?.evidence),
+      location(proposed.review?.evidence?.rules?.[rule.rule_id] || rule.evidence));
     previous.delete(rule.rule_id);
   }
-  for (const rule of previous.values()) add(rule.name, OUTCOME_LABEL[rule.outcome], null);
+  for (const rule of previous.values()) {
+    add(rule.name, OUTCOME_LABEL[rule.outcome], null);
+    add(`${rule.name} · reason`, rule.message, null);
+    add(`${rule.name} · evidence`, location(official.review?.evidence?.rules?.[rule.rule_id] || rule.evidence), null);
+  }
   const revision = state.detail.revision;
   const scope = invoiceScope;
-  const accept = button("Accept and confirm recheck", async () => {
+  const origin = candidate.origin;
+  const title = origin === "staff_draft" ? "Saved review draft" :
+    ["assistant_recheck", "rule_recalculation"].includes(origin) ? "Recheck awaiting review" : "Pending change awaiting review";
+  const accept = button("Accept and confirm", async () => {
     if (!currentInvoiceScope(project, scope) || state.selected !== invoiceId) return;
     if (state.reviewDirty) { notify("Save or discard your current edits before accepting the recheck.", true); return; }
     if (!(await askConfirm("Replace the confirmed decision with this recheck? The previous confirmation will be kept in the invoice history.", "Accept recheck"))) return;
@@ -208,30 +313,52 @@ function candidatePanel(official, candidate, project, invoiceId) {
       if (currentInvoiceScope(project, scope)) notify(error.message, true);
     } finally { accept.disabled = false; }
   }, "primary");
-  return el("section", { class: "candidate-panel" }, el("h3", { text: "Recheck awaiting review" }),
-    el("p", { text: "Exports continue to use the confirmed decision until you accept this recheck." }),
+  const discard = button("Discard pending change", async () => {
+    if (!(await askConfirm("Discard this pending change? The confirmed decision remains available.", "Discard change"))) return;
+    if (!currentInvoiceScope(project, scope) || state.selected !== invoiceId) return;
+    try {
+      await api("POST", `/api/result/${encodeURIComponent(invoiceId)}/discard-candidate`,
+        { revision, candidate_revision: candidate.revision }, project);
+      editingCandidate = false;
+      await selectInvoice(invoiceId, true, project);
+      await loadInvoices();
+    } catch (error) { notify(error.message, true); }
+  });
+  const edit = origin === "staff_draft" ? button("Continue draft", () => {
+    editingCandidate = true;
+    renderDetail(state.invoices.find(invoice => invoice.id === invoiceId)?.file || invoiceId);
+  }, "primary") : null;
+  return el("section", { class: "candidate-panel" }, el("h3", { text: title }),
+    el("p", { text: "Exports continue to use the confirmed decision until you accept this change." }),
     differences.length ? el("div", { class: "table-wrap" }, el("table", { class: "plain" },
-      el("thead", {}, el("tr", {}, ["Change", "Confirmed", "Recheck"].map(t => el("th", { text: t })))),
+      el("thead", {}, el("tr", {}, ["Change", "Confirmed", "Pending"].map(t => el("th", { text: t })))),
       el("tbody", {}, differences.map(row => el("tr", {}, row.map(value => el("td", { text: String(value) }))))))) :
       el("p", { text: "The document type, values, status, rule decisions and reasons match the confirmation." }),
-    el("details", {}, el("summary", { text: "Inspect recheck evidence and explanations" }),
+    el("details", {}, el("summary", { text: "Inspect pending evidence and explanations" }),
       proposed.summary ? el("p", { text: proposed.summary }) : null,
       proposed.type_reason ? el("p", { text: proposed.type_reason }) : null,
       (proposed.questions || []).map(q => el("p", { text: q })),
       el("ul", {}, (proposed.rule_results || []).map(r => el("li", { text: `${r.name} · ${OUTCOME_LABEL[r.outcome] || r.outcome}${r.message ? " — " + r.message : ""}` }))),
-      viewer(state.detail.pages, candidate.marks || [], "recheck")),
-    accept);
+      !proposed.source_digest ? el("p", { class: "muted small", text: "This older result has no saved document fingerprint, so its evidence pages cannot be verified against the original file." }) : null,
+      candidate.pages_error ? el("p", { class: "empty", text: candidate.pages_error }) :
+        viewer(candidate.pages || [], candidate.marks || [], "recheck")),
+    el("div", { class: "action-row" }, discard, edit, origin === "staff_draft" ? null : accept));
 }
 
 function renderDetail(filename) {
-  const { result, pages, marks, candidate } = state.detail;
+  const { candidate } = state.detail;
+  const pages = editingCandidate ? candidate.pages : state.detail.pages;
+  const pagesError = editingCandidate ? candidate.pages_error : state.detail.pages_error;
+  const result = reviewResult();
+  const marks = editingCandidate ? candidate.marks : state.detail.marks;
   const id = state.selected, project = state.current;
   const basePrompt = `invoice "${id}" in project "${project}"`;
-  const checkRequest = promptButton(result ? "Copy recheck request" : "Copy check request",
-    `${result ? "Recheck" : "Check"} ${basePrompt} against this project's confirmed rules.`);
+  const checkRequest = candidate ? null : guardedCheckButton(result ? "Copy recheck request" : "Copy check request",
+    result ? `Recheck ${basePrompt} against this project's confirmed rules. The displayed base revision is "${state.detail.revision}". Preserve any pending change.` :
+      `Check ${basePrompt} against this project's confirmed rules only if it is still unchecked.`, project, invoiceScope);
   const exportAction = result ? el("button", { type: "button", class: "ghost", text: "Export", "aria-haspopup": "dialog",
     "data-export-invoice": id, "data-export-project": project }) : null;
-  const header = invoiceHeader(filename, exportAction, checkRequest);
+  const header = invoiceHeader(filename, ...[exportAction, checkRequest].filter(Boolean));
   const container = document.getElementById("invoice-detail");
   if (!result) {
     container.replaceChildren(header, el("p", { text: "Paste the check request into your project chat. The findings will appear here." }), viewer(pages, []));
@@ -252,8 +379,9 @@ function renderDetail(filename) {
     pill(STATUS_LABEL[result.status] || result.status, result.status),
     pill(reviewLabel, reviewStatus === "confirmed" ? "reviewed" : ""),
     el("span", { class: "muted small", text: `${count} rule${count === 1 ? "" : "s"} checked` }));
-  const findings = findingsList(result, marks, pages, basePrompt);
-  const values = fieldsTable(result, marks, pages);
+  const readOnly = Boolean(candidate && !editingCandidate);
+  const findings = findingsList(result, marks, pages, basePrompt, readOnly);
+  const values = fieldsTable(result, marks, pages, readOnly);
   const switchView = name => {
     state.reviewView = name;
     findings.hidden = name !== "findings";
@@ -268,6 +396,12 @@ function renderDetail(filename) {
     tabindex: pages?.length ? "0" : undefined },
     el("div", { class: "view-tabs", role: "group", "aria-label": "Review content" }, findingsButton, valuesButton),
     status, findings, values);
+  if (result.status === "no applicable rules") {
+    status.append(button("Review rules", () => {
+      document.getElementById("invoice-detail").dispatchEvent(new CustomEvent("review-rules",
+        { bubbles: true, detail: { typeId: result.type_id } }));
+    }));
+  }
   const returnToCard = mark => {
     const selector = `[data-evidence-mark="${mark.number}"]`;
     const list = state.reviewView === "findings" ? findings : values;
@@ -278,9 +412,10 @@ function renderDetail(filename) {
     control.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
   container.replaceChildren(header, description, ...questions,
-    ...(candidate ? [candidatePanel(result, candidate, project, id)] : []),
+    ...(!result.source_digest ? [el("p", { class: "muted small", text: "This older result has no saved document fingerprint, so its evidence pages cannot be verified against the original file." })] : []),
+    ...(candidate && !editingCandidate ? [candidatePanel(result, candidate, project, id)] : []),
     el("div", { class: pages?.length ? "detail-grid has-pages" : "detail-grid" },
-      review, viewer(pages, marks, "invoice", returnToCard)), reviewBox(result));
+      review, pagesError ? el("p", { class: "empty", text: pagesError }) : viewer(pages, marks, "invoice", returnToCard)), !candidate || editingCandidate ? reviewBox(result) : null);
 }
 
 function evidenceHeading(card, name, mark, page, pages) {
@@ -317,7 +452,7 @@ function evidenceHeading(card, name, mark, page, pages) {
 
 function editEvidence(group, key, name, location, pages) {
   const edit = button("Move mark", () => {
-    const saved = state.detail.result.review?.evidence?.[group]?.[key] || location;
+    const saved = reviewResult().review?.evidence?.[group]?.[key] || location;
     const originalPage = saved?.page || 1;
     const originalBox = saved?.box ? [...saved.box] : null;
     let box = originalBox ? [...originalBox] : null;
@@ -418,7 +553,7 @@ function editEvidence(group, key, name, location, pages) {
           message.textContent = "Draw a box around the evidence, or enter all four valid coordinates.";
           return;
         }
-        const review = state.detail.result.review ||= {};
+        const review = reviewResult().review ||= {};
         const evidence = review.evidence ||= { fields: {}, rules: {} };
         (evidence[group] ||= {})[key] = { page: Number(page.value), box: [...box] };
         state.reviewDirty = true;
@@ -434,12 +569,18 @@ function editEvidence(group, key, name, location, pages) {
   return edit;
 }
 
-function findingCard(rule, review, mark, page, pages, basePrompt) {
+function findingCard(rule, review, mark, page, pages, basePrompt, readOnly = false) {
   const card = el("li", { class: `finding ${rule.outcome}` });
   const decision = el("div", { class: "finding-outcome" });
   card.append(evidenceHeading(card, rule.name, mark, page, pages), decision);
   const key = rule.rule_id;
-  if (key === "DUPLICATE_NUMBER") {
+  if (readOnly) {
+    decision.append(pill(OUTCOME_LABEL[rule.outcome] || rule.outcome, rule.outcome));
+    if (rule.message) card.append(el("p", { text: rule.message }));
+    if (rule.review_reason && rule.ai_message && rule.ai_message !== rule.message) {
+      card.append(el("p", { class: "small muted", text: `Assistant: ${rule.ai_message}` }));
+    }
+  } else if (key === "DUPLICATE_NUMBER") {
     decision.append(pill(OUTCOME_LABEL[rule.outcome] || rule.outcome, rule.outcome));
     if (rule.message) card.append(el("p", { text: rule.message }));
   } else {
@@ -500,16 +641,16 @@ function findingCard(rule, review, mark, page, pages, basePrompt) {
     card.append(label, el("div", { class: "action-row small" }, edit, reset));
   }
   card.append(el("div", { class: "action-row small" },
-    pages?.length ? editEvidence("rules", key, rule.name, rule.evidence, pages) : null,
+    !readOnly && pages?.length ? editEvidence("rules", key, rule.name, rule.evidence, pages) : null,
     promptButton("Copy question", `Explain the finding "${rule.name}" (rule "${key}") for ${basePrompt}${mark ? ` at mark ${mark.number} on page ${mark.page}` : ""}. Verify the evidence and explain any uncertainty.`)));
   return card;
 }
 
-function findingsList(result, marks, pages, basePrompt) {
+function findingsList(result, marks, pages, basePrompt, readOnly = false) {
   const items = (result.rule_results || []).map(rule => {
     const mark = marks.find(m => m.label === rule.name && m.kind === rule.outcome && (!rule.evidence?.box || (m.page === rule.evidence.page && m.box.join() === rule.evidence.box.join())));
     const page = mark?.page ?? rule.evidence?.page ?? result.visual?.[rule.rule_id]?.page;
-    return findingCard(rule, result.review || {}, mark, page, pages, basePrompt);
+    return findingCard(rule, result.review || {}, mark, page, pages, basePrompt, readOnly);
   });
   return el("ul", { class: "findings" }, items.length ? items : [el("li", { class: "empty", text: "No confirmed rules apply to this document type." })]);
 }
@@ -539,7 +680,7 @@ function valueEditor(field, input, type) {
   return el("div", { class: "inline-edit" }, edit, editor);
 }
 
-function fieldsTable(result, marks, pages) {
+function fieldsTable(result, marks, pages, readOnly = false) {
   const original = (result.ai_original || result).fields || {};
   const previous = result.review?.fields || {};
   const configured = state.config.fields.filter(f => f.type_id === result.type_id);
@@ -559,8 +700,8 @@ function fieldsTable(result, marks, pages) {
       corrected ? el("p", { class: "small muted", text: `Originally read: ${read.value ?? "No value found"}` }) : null,
       read.status === "uncertain" ? pill("Uncertain", "unclear") : null,
       read.note ? el("p", { class: "small", text: read.note }) : null,
-      valueEditor(f, input, result.type_id),
-      pages?.length ? editEvidence("fields", f.name, f.label, (result.review?.evidence?.fields || {})[f.name] || read, pages) : null);
+      !readOnly ? valueEditor(f, input, result.type_id) : null,
+      !readOnly && pages?.length ? editEvidence("fields", f.name, f.label, (result.review?.evidence?.fields || {})[f.name] || read, pages) : null);
     card.prepend(evidenceHeading(card, f.label, mark, mark?.page ?? located.page, pages));
     return card;
   });
@@ -573,7 +714,7 @@ function reviewBox(result) {
   return el("section", { class: "review-box" }, el("h3", { text: "Your review" }),
     el("p", { class: "small", text: "Edits apply to this invoice. Confirm to use your decision in the register." }),
     el("details", {}, el("summary", { text: "Add a project tip for future checks" }), el("label", {}, "This tip will be saved when you save the review.", tip)),
-    el("div", { class: "action-row" }, result.review?.status === "confirmed" ? null : button("Save draft", () => submitReview("draft")),
+    el("div", { class: "action-row" }, button("Save draft", () => submitReview("draft")),
       button("Confirm review", () => submitReview("confirmed"), "primary")));
 }
 
@@ -596,7 +737,7 @@ function viewer(pages, marks, prefix = "invoice", onMark) {
 }
 
 function collectReview() {
-  const result = state.detail.result;
+  const result = reviewResult();
   const original = (result.ai_original || result).fields || {};
   const fields = { ...((result.review || {}).fields || {}) };
   for (const input of document.querySelectorAll("#invoice-detail input[data-field]")) {
@@ -616,7 +757,7 @@ function collectReview() {
   for (const input of document.querySelectorAll("#invoice-detail textarea[data-reason]")) {
     if (input.value.trim()) rule_reasons[input.dataset.reason] = input.value.trim();
   }
-  return { fields, rules, rule_reasons, evidence: result.review?.evidence || {} };
+  return { fields, rules, rule_reasons, evidence: result.review?.evidence || {}, note: result.review?.note || "" };
 }
 
 async function submitReview(status) {
@@ -626,9 +767,10 @@ async function submitReview(status) {
   const tip = document.getElementById("review-tip");
   const current = () => currentInvoiceScope(project, scope) && state.selected === id && tip.isConnected;
   const body = { ...collectReview(), status, revision: state.detail.revision, learning: tip.value };
+  if (editingCandidate) body.candidate_revision = state.detail.candidate.revision;
   if (status === "confirmed") {
     const changes = Object.entries(body.fields).map(([key, value]) => `${key} → ${value ?? "empty"}`);
-    for (const rule of state.detail.result.rule_results || []) {
+    for (const rule of reviewResult().rule_results || []) {
       const decision = body.rules[rule.rule_id], reason = body.rule_reasons[rule.rule_id];
       if (decision || reason) changes.push(`${rule.name} → ${OUTCOME_LABEL[decision || rule.check_outcome || rule.outcome]}${reason ? " · " + reason : ""}`);
     }
@@ -640,6 +782,11 @@ async function submitReview(status) {
   const controls = [...document.querySelectorAll(
     "#invoice-detail select[data-rule], #invoice-detail [data-reason], #invoice-detail [data-reset-finding], #invoice-detail [data-field], #review-tip, #invoice-detail .review-box button")];
   if (controls.some(control => control.disabled)) return;
+  // Evidence controls can also change the review. Keep the entire pane stable
+  // until the submitted version has been published.
+  const reviewPane = document.querySelector("#invoice-detail .review-detail");
+  const wasInert = reviewPane?.inert;
+  if (reviewPane) reviewPane.inert = true;
   controls.forEach(control => { control.disabled = true; });
   state.reviewDirty = true;
   try {
@@ -647,11 +794,14 @@ async function submitReview(status) {
     if (!current()) return;
     state.reviewDirty = false;
     notify(status === "confirmed" ? "Review confirmed and saved." : "Draft saved.");
+    editingCandidate = false;
     await loadInvoices();
-    if (current()) await selectInvoice(id, true, project);
+    if (current() && status === "confirmed") await backToList();
+    else if (current()) await selectInvoice(id, true, project);
   } catch (error) {
     if (current()) notify(error.message, true);
   } finally {
+    if (reviewPane) reviewPane.inert = wasInert;
     controls.forEach(control => { control.disabled = false; });
   }
 }

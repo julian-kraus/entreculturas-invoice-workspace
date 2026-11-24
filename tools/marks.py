@@ -12,6 +12,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+import common
 from checks import final_fields
 from common import WorkspaceError, current_project, load_json, print_json, project_dir, rel, result_path, work_dir
 from grid import font, to_pixels
@@ -102,16 +103,12 @@ def draw(slug: str, invoice_id: str, *, result: dict | None = None,
         result = load_json(result_path(slug, invoice_id))
     if not result:
         raise WorkspaceError(f"There is no result for '{invoice_id}' yet.")
-    pages_dir = work_dir(slug, invoice_id)
-    if not (pages_dir / "page-1.png").is_file():
-        render(slug, invoice_id)
+    page_files = [common.ROOT / page["path"] for page in render(slug, invoice_id, result.get("source_digest"))]
     results_dir = project_dir(slug) / "results"
     if out_dir is None:
-        out_dir = (results_dir / result["marked_file"]).parent if result.get("marked_file") else results_dir / "marked"
+        out_dir = work_dir(slug, invoice_id) / "redrawn"
     out_dir.mkdir(parents=True, exist_ok=True)
     items = marks_for(result)
-    page_files = sorted((p for p in pages_dir.glob("page-*.png") if p.stem[5:].isdecimal()),
-                        key=lambda p: int(p.stem[5:]))
     if any(item["page"] < 1 or item["page"] > len(page_files) for item in items):
         raise WorkspaceError("An evidence box points to a page outside this document. Check its page number.")
     marked_pages, outputs = [], []

@@ -10,11 +10,13 @@ import tempfile
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / "projects"
 WORKSPACE_FILE = ROOT / "workspace.json"
+PDFIUM_LOCK = Lock()
 
 INVOICE_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,80}$")
@@ -126,8 +128,11 @@ def invoice_files(slug: str) -> dict[str, Path]:
         recorded = load_json(folder / ".upload-names" / f"{stem}.json", {}) or {}
         preferred = recorded.get("file")
         if len(paths) > 1 and not preferred:
-            previous = load_json(results / f"{stem}.json", {}) or {}
-            preferred = previous.get("file")
+            try:
+                previous = load_json(results / f"{stem}.json", {}) or {}
+            except (ValueError, OSError):
+                previous = {}
+            preferred = previous.get("file") if isinstance(previous, dict) else None
         owner = next((p for p in paths if p.name == preferred), paths[-1])
         for path in paths:
             key = stem
@@ -141,6 +146,33 @@ def invoice_files(slug: str) -> dict[str, Path]:
                     key = f"{stem[:57]}-{digest[:20]}"
             files[key] = path
     return files
+
+
+
+def ambiguous_invoice_ids(slug: str) -> set[str]:
+    """Find legacy same-stem invoices whose unreadable result cannot identify its source."""
+    base = project_dir(slug)
+    files = invoice_files(slug)
+    groups: dict[str, list[tuple[str, Path]]] = {}
+    for invoice_id, path in files.items():
+        groups.setdefault(slugify(path.stem), []).append((invoice_id, path))
+    ambiguous = set()
+    for stem, entries in groups.items():
+        if len(entries) < 2:
+            continue
+        recorded = load_json(base / "invoices" / ".upload-names" / f"{stem}.json", {}) or {}
+        if isinstance(recorded, dict) and recorded.get("file") in {path.name for _, path in entries}:
+            continue
+        result = base / "results" / f"{stem}.json"
+        if not result.exists():
+            continue
+        try:
+            value = load_json(result)
+        except (ValueError, OSError):
+            value = None
+        if not isinstance(value, dict) or value.get("file") not in {path.name for _, path in entries}:
+            ambiguous.update(invoice_id for invoice_id, _ in entries)
+    return ambiguous
 
 
 def invoice_display_name(slug: str, invoice_id: str, *, source: Path | None = None) -> str:

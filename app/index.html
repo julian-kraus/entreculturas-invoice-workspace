@@ -53,7 +53,7 @@
     </fieldset>
     <label>Funder guidelines (optional)
       <input type="file" id="new-project-guidelines" accept=".pdf,.txt,.md" multiple>
-      <small>Guidelines are sent to Codex using your signed-in plan to detect proposed rules.</small>
+      <small>Readable guideline text, invoice types, fields and existing rules are sent to Codex using your signed-in plan to detect proposed rules.</small>
     </label>
     </div>
     <div id="new-project-result" hidden aria-live="polite"></div>
@@ -76,15 +76,12 @@
   <div id="no-project" class="empty" hidden><h2>Choose a project</h2><p>Select a project above or create one to start checking invoices.</p></div>
   <section id="panel-invoices" class="panel" aria-labelledby="tab-invoices">
     <div id="invoice-home">
-      <div class="section-head"><div><h2 class="page-title">Invoices</h2><p id="invoice-count" class="muted"></p></div></div>
+      <div class="section-head"><div><h2 class="page-title">Invoices</h2><p id="invoice-count" class="muted" role="status" aria-live="polite"></p></div></div>
       <button type="button" class="drop" id="invoice-drop"><b>Add invoices</b><span>Choose PDFs or photos, or drop them here</span></button>
       <input type="file" id="invoice-upload" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple hidden>
       <div id="invoice-upload-results"></div>
-      <div id="pending-batch" class="pending-batch" hidden>
-        <strong id="pending-summary"></strong>
-        <button type="button" id="pending-copy" class="primary">Copy check request</button>
-      </div>
-      <ul id="invoice-list" class="navigation-list invoice-list"></ul>
+      <div id="invoice-rules-status"></div>
+      <div id="invoice-list"></div>
     </div>
     <section id="invoice-detail" class="invoice-detail" hidden></section>
   </section>
@@ -135,7 +132,7 @@
     <p>Open the invoice, choose <b>Copy check request</b> and paste the request into your project chat. For one finding, use its <b>Copy question</b> action. Project and invoice IDs travel with the request.</p>
     <h3>Use the workspace</h3>
     <p>Use <b>Invoices</b> to add invoices, review findings and correct results. Choose an outcome at the top of a rule finding and enter your reason, or use <b>Edit reason</b> to explain the existing decision. On a checked invoice, <b>Export</b> offers the marked PDF, CSV and copyable results.</p>
-    <p>Under <b>Project setup</b>, add funder guidelines in <b>Project details</b>, review proposals in the <b>Inbox</b> and edit descriptions and rules. In <b>Settings → Export</b>, you can also download workbooks, setup files and selected history entries, or copy a confirmed spreadsheet row. Open <b>History</b> to see project activity or <b>Assistant settings</b> to choose models.</p>
+    <p>Under <b>Project setup</b>, add funder guidelines in <b>Project details</b>, review proposals in the <b>Inbox</b> and edit descriptions and rules. After confirming reviews, use <b>Tips from corrections → Copy improvement request</b> to ask the assistant for suggestions. In <b>Settings → Export</b>, you can also download workbooks, setup files and selected history entries, or copy a confirmed spreadsheet row. Open <b>History</b> to see project activity or <b>Assistant settings</b> to choose models.</p>
     <h3>First-time setup</h3>
     <ol>
       <li>Sign in to Claude Code or Codex on this computer.</li>
