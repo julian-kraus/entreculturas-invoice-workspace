@@ -1,7 +1,7 @@
 """Save what the assistant read from an invoice, then run the rules and draw the marks.
 
 Usage:
-  ./.tools/uv run tools/results.py save <invoice> <draft.json> [--set evaluation]
+  ./.tools/uv run tools/results.py save <invoice> <draft.json>
 
 The draft is a JSON object:
 {
@@ -32,7 +32,7 @@ from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
-from checks import checked_result, record_for_display
+from checks import DUPLICATE_RULE, RULE_OUTCOMES, checked_result, record_for_display
 from common import (
     WorkspaceError, current_project, invoice_display_name, invoice_path, load_config, load_json, log, now_iso, print_json,
     project_dir, rel, result_path, save_json,
@@ -72,7 +72,10 @@ def detail_state(slug: str, invoice_id: str) -> dict:
     if is_confirmed(result):
         types = {t["id"]: t.get("name", t["id"]) for t in load_config(slug)["invoice_types"]}
         row = summary_row(result, types)
-    return {"result": result, "revision": revision(result), "candidate": stored.get("pending_recheck"),
+    candidate = stored.get("pending_recheck")
+    if candidate:
+        candidate = candidate | {"result": record_for_display(candidate["result"])}
+    return {"result": result, "revision": revision(result), "candidate": candidate,
             "confirmed_row": row, "marked_pdf": marked_path(path, result) if result else None}
 
 
@@ -87,16 +90,16 @@ def archive_confirmation(path: Path, previous: dict) -> None:
         save_json(archived, record_for_display(previous))
 
 
-def publish(slug: str, invoice_id: str, which: str, result: dict, previous: dict,
+def publish(slug: str, invoice_id: str, result: dict, previous: dict,
             *, stage: bool = False) -> str:
     """Render a new version first, then publish one atomic JSON pointer."""
-    path = result_path(slug, invoice_id, which)
+    path = result_path(slug, invoice_id)
     version = uuid4().hex
     out = path.parent / "marked" / invoice_id / version
     result["revision"] = version
     result["marked_file"] = (out / f"{invoice_id}-marked.pdf").relative_to(path.parent).as_posix()
     try:
-        draw(slug, invoice_id, which, result=result, out_dir=out, save_pages=False)
+        draw(slug, invoice_id, result=result, out_dir=out, save_pages=False)
         if stage:
             pending = {"revision": version, "result": result}
             save_json(path, previous | {"pending_recheck": pending})
@@ -114,40 +117,39 @@ def publish(slug: str, invoice_id: str, which: str, result: dict, previous: dict
     return marked_path(path, result)
 
 
-def save(slug: str, invoice_id: str, draft: dict, which: str) -> dict:
+def save(slug: str, invoice_id: str, draft: dict) -> dict:
     if not isinstance(draft, dict):
         raise WorkspaceError("The draft must be an object.")
     unknown = set(draft) - ALLOWED_KEYS
     if unknown:
         raise WorkspaceError(f"Unknown keys in the draft: {sorted(unknown)}.")
-    source = invoice_path(slug, invoice_id, which)
+    source = invoice_path(slug, invoice_id)
     incoming = {"invoice": invoice_id, "file": source.name,
-                "display_file": invoice_display_name(slug, invoice_id, which, source=source), "checked_at": now_iso(), "checked_by": "assistant",
+                "display_file": invoice_display_name(slug, invoice_id, source=source), "checked_at": now_iso(), "checked_by": "assistant",
                 "fields": {}, "visual": {}, "questions": [], "summary": ""} | draft
     with review_lock(slug):
-        previous = load_json(result_path(slug, invoice_id, which)) or {}
-        checked = checked_result(slug, which, incoming)
-        staged = which == "invoices" and is_confirmed(previous)
-        pdf = publish(slug, invoice_id, which, checked, previous, stage=staged)
+        previous = load_json(result_path(slug, invoice_id)) or {}
+        checked = checked_result(slug, incoming)
+        staged = is_confirmed(previous)
+        pdf = publish(slug, invoice_id, checked, previous, stage=staged)
         failures = [o["name"] for o in checked["rule_results"] if o["outcome"] == "failed"]
-        if which == "invoices":
-            action = "recheck ready for review" if staged else "invoice checked"
-            log(slug, "assistant", action, {"invoice": invoice_id, "status": checked["status"], "failed": failures})
+        action = "recheck ready for review" if staged else "invoice checked"
+        log(slug, "assistant", action, {"invoice": invoice_id, "status": checked["status"], "failed": failures})
     return {"invoice": invoice_id, "status": checked["status"], "rules_checked": checked["rules_checked"],
             "failed": failures, "unclear": [o["name"] for o in checked["rule_results"] if o["outcome"] == "unclear"],
             "staged": staged, "marked_pdf": pdf}
 
 
-def recalculate(slug: str, invoice_id: str, which: str = "invoices") -> dict:
+def recalculate(slug: str, invoice_id: str) -> dict:
     """The rules CLI uses the same publication boundary as a full recheck."""
     with review_lock(slug):
-        path = result_path(slug, invoice_id, which)
+        path = result_path(slug, invoice_id)
         previous = load_json(path)
         if not previous:
             raise WorkspaceError(f"There is no result for '{invoice_id}' yet.")
-        checked = checked_result(slug, which, record_for_display(previous))
-        staged = which == "invoices" and is_confirmed(previous)
-        publish(slug, invoice_id, which, checked, previous, stage=staged)
+        checked = checked_result(slug, record_for_display(previous))
+        staged = is_confirmed(previous)
+        publish(slug, invoice_id, checked, previous, stage=staged)
         return checked
 
 
@@ -166,21 +168,60 @@ def save_review(slug: str, invoice_id: str, body: dict) -> dict:
         known_fields = {f["name"] for f in config["fields"] if f["type_id"] == result.get("type_id")}
         corrections = {k: v for k, v in (body.get("fields") or {}).items() if k in known_fields}
         known_rules = {o["rule_id"] for o in result.get("rule_results", [])}
-        overrides = {k: v for k, v in (body.get("rules") or {}).items() if k in known_rules and v in ("passed", "failed")}
+        known_rules.discard(DUPLICATE_RULE)
+        decisions = body.get("rules", {})
+        # Older clients submit only decisions. Preserve reasons while that decision stays the same.
+        previous_review = result.get("review") or {}
+        if not isinstance(decisions, dict):
+            raise WorkspaceError("Finding decisions must be keyed by rule.")
+        if "rule_reasons" in body:
+            reasons = body["rule_reasons"]
+        else:
+            reasons = {k: v for k, v in (previous_review.get("rule_reasons") or {}).items()
+                       if decisions.get(k) == (previous_review.get("rules") or {}).get(k)}
+        if not isinstance(reasons, dict):
+            raise WorkspaceError("Finding reasons must be keyed by rule.")
+        if any(k not in known_rules or v not in RULE_OUTCOMES for k, v in decisions.items()):
+            raise WorkspaceError("Choose a listed outcome for each editable finding.")
+        if any(k not in known_rules or not isinstance(v, str) for k, v in reasons.items()):
+            raise WorkspaceError("Enter a text reason for an editable finding.")
+        reasons = {k: v.strip() for k, v in reasons.items() if v.strip()}
+        previous_decisions = previous_review.get("rules") or {}
+        findings = {item["rule_id"]: item for item in result.get("rule_results", [])}
+        for key, decision in decisions.items():
+            automatic = findings[key].get("check_outcome", findings[key].get("ai_outcome", findings[key]["outcome"]))
+            if ({automatic, decision} == {"passed", "failed"} and not reasons.get(key)
+                    and (previous_decisions.get(key) != decision or (previous_review.get("rule_reasons") or {}).get(key))):
+                raise WorkspaceError(f"Explain why you changed the decision for {findings[key].get('name', key)}.")
+        evidence = body.get("evidence", previous_review.get("evidence", {}))
+        if not isinstance(evidence, dict) or set(evidence) - {"fields", "rules"}:
+            raise WorkspaceError("Evidence locations must be grouped by field or rule.")
+        for group, known in (("fields", known_fields), ("rules", known_rules)):
+            locations = evidence.get(group, {})
+            if not isinstance(locations, dict):
+                raise WorkspaceError("Evidence locations must be keyed by field or rule.")
+            for key, location in locations.items():
+                if key not in known or not isinstance(location, dict):
+                    raise WorkspaceError("This evidence location does not belong to the invoice.")
+                box, page = location.get("box"), location.get("page")
+                if (type(page) is not int or page < 1 or not isinstance(box, list) or len(box) != 4
+                        or any(type(v) not in (int, float) for v in box)
+                        or not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1)):
+                    raise WorkspaceError("Select a valid location on an invoice page.")
         status = body.get("status")
         if status not in ("draft", "confirmed"):
             raise WorkspaceError("Choose Save draft or Confirm review.")
         who = body.get("by") or "staff"
-        result["review"] = {"fields": corrections, "rules": overrides, "status": status,
-                            "by": who, "at": now_iso(), "note": body.get("note", "")}
-        result = checked_result(slug, "invoices", result)
+        result["review"] = {"fields": corrections, "rules": decisions, "rule_reasons": reasons, "status": status,
+                            "by": who, "at": now_iso(), "note": body.get("note", ""), "evidence": evidence}
+        result = checked_result(slug, result)
         staged = is_confirmed(previous) and status == "draft"
-        publish(slug, invoice_id, "invoices", result, previous, stage=staged)
+        publish(slug, invoice_id, result, previous, stage=staged)
         log(slug, who, "review saved", {
             "invoice": invoice_id, "status": status, "staged": staged,
             "corrected fields": {k: {"assistant read": (result["ai_original"].get("fields", {}).get(k) or {}).get("value"),
                                      "reviewer": v} for k, v in corrections.items()},
-            "changed rule outcomes": overrides, "before": (previous.get("review") or {}).get("status")})
+            "changed rule outcomes": decisions, "finding reasons": reasons, "before": (previous.get("review") or {}).get("status")})
         tip = (body.get("learning") or "").strip()
         if tip:
             file = project_dir(slug) / "learnings.json"
@@ -221,11 +262,10 @@ def main() -> int:
     parser.add_argument("command", choices=["save"])
     parser.add_argument("invoice")
     parser.add_argument("draft")
-    parser.add_argument("--set", dest="which", default="invoices", choices=["invoices", "evaluation"])
     args = parser.parse_args()
     try:
         draft = json.loads(Path(args.draft).read_text(encoding="utf-8"))
-        print_json(save(current_project(), args.invoice, draft, args.which))
+        print_json(save(current_project(), args.invoice, draft))
     except json.JSONDecodeError as error:
         print(f"Error: the draft is not valid JSON ({error}).", file=sys.stderr)
         return 1

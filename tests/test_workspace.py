@@ -8,11 +8,9 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import common  # noqa: E402
-import evaluate  # noqa: E402
 import grid  # noqa: E402
 import results  # noqa: E402
-from checks import evaluate as evaluate_rules  # noqa: E402
-from values import parse_amount, parse_date, same_value  # noqa: E402
+from values import parse_amount, parse_date  # noqa: E402
 
 
 @pytest.fixture()
@@ -66,8 +64,6 @@ def test_values():
     assert parse_date("28 août 2025").isoformat() == "2025-08-28"
     assert parse_date("12 de marzo de 2026").isoformat() == "2026-03-12"
     assert parse_date("03/04/2025").isoformat() == "2025-04-03"
-    assert same_value("30.000", "30000", "amount")
-    assert same_value("Relais  Communautaire", "relais communautaire")
 
 
 def test_grid_boxes():
@@ -80,7 +76,7 @@ def test_grid_boxes():
 
 
 def test_save_checks_and_marks(project):
-    summary = results.save(project, "receipt-a", draft(), "invoices")
+    summary = results.save(project, "receipt-a", draft())
     assert summary["status"] == "passes"
     saved = common.load_json(common.result_path(project, "receipt-a"))
     outcomes = {o["rule_id"]: o["outcome"] for o in saved["rule_results"]}
@@ -92,45 +88,38 @@ def test_invalid_draft_is_rejected_and_not_kept(project):
     bad = draft()
     bad["fields"]["unknown_field"] = {"value": "x", "status": "found"}
     with pytest.raises(common.WorkspaceError):
-        results.save(project, "receipt-a", bad, "invoices")
+        results.save(project, "receipt-a", bad)
     assert not common.result_path(project, "receipt-a").exists()
 
 
 def test_date_outside_period_fails(project):
-    summary = results.save(project, "receipt-a", draft(date="12/03/2026"), "invoices")
+    summary = results.save(project, "receipt-a", draft(date="12/03/2026"))
     assert summary["status"] == "fails rules"
     assert "date in period" in summary["failed"]
 
 
-def test_review_overrides_and_evaluation(project):
-    results.save(project, "receipt-a", draft(stamp="fail"), "invoices")
-    path = common.result_path(project, "receipt-a")
-    result = common.load_json(path)
-    result["ai_original"] = {k: v for k, v in result.items() if k != "review"}
-    result["review"] = {"fields": {"total_amount": "35.000"}, "rules": {"R3": "passed"}, "status": "confirmed"}
-    config = common.load_config(project)
-    result.update(evaluate_rules(result, config, {}))
-    common.save_json(path, result)
-    assert result["status"] == "passes"
-    truth = evaluate.add(project, "receipt-a", aside=False)
-    assert truth["fields"]["total_amount"] == "35.000"
-    assert truth["rules"]["R3"] == "passed"
-    run = evaluate.score(project)
-    totals = run["groups"]["main"]["totals"]
-    assert totals["false_alarm"] == 1  # the assistant failed the stamp; the reviewer passed it
-    assert run["groups"]["main"]["fields_right"] == 2  # the amount was read wrongly
+def test_review_overrides(project):
+    results.save(project, "receipt-a", draft(stamp="fail"))
+    review = results.save_review(project, "receipt-a", {
+        "revision": results.detail_state(project, "receipt-a")["revision"],
+        "status": "confirmed", "fields": {"total_amount": "35.000"}, "rules": {"R3": "passed"},
+        "rule_reasons": {"R3": "The stamp is visible."},
+    })
+    assert review["status"] == "passes"
+    assert review["review"]["fields"]["total_amount"] == "35.000"
+    assert next(rule for rule in review["rule_results"] if rule["rule_id"] == "R3")["outcome"] == "passed"
 
 
 def test_duplicate_invoice_numbers(project):
     base = common.PROJECTS / project / "invoices"
     Image.new("RGB", (600, 800), "white").save(base / "receipt-b.png")
-    results.save(project, "receipt-a", draft(number="A-1"), "invoices")
-    summary = results.save(project, "receipt-b", draft(number="a-1 "), "invoices")
+    results.save(project, "receipt-a", draft(number="A-1"))
+    summary = results.save(project, "receipt-b", draft(number="a-1 "))
     assert "Invoice number used only once" in summary["failed"]
 
 
 def test_history_is_written(project):
-    results.save(project, "receipt-a", draft(), "invoices")
+    results.save(project, "receipt-a", draft())
     actions = [e["action"] for e in common.read_history(project)]
     assert "invoice checked" in actions
 
@@ -179,3 +168,55 @@ def test_setup_export_and_import(project):
     assert common.load_json(common.PROJECTS / slug / "project.json")["name"] == "Colleague copy"
     with pytest.raises(common.WorkspaceError):
         project_tool.import_setup("Bad", {"format": "something else"})
+
+
+def test_register_row_uses_supplier_invoice_details():
+    from report import REGISTER_COLUMNS, register_row
+    config = {"fields": [
+        {"type_id": "T", "name": "invoice_number", "label": "Funds request number"},
+        {"type_id": "T", "name": "invoice_date", "label": "Funds request date"},
+    ]}
+    result = {"invoice": "receipt-a", "type_id": "T", "file": "receipt.pdf", "fields": {
+        "invoice_number": {"value": "request-1"},
+        "invoice_date": {"value": "01/01/2025"},
+        "supplier_invoice_number": {"value": "supplier-2"},
+        "supplier_invoice_date": {"value": "02/01/2025"},
+        "total_amount": {"value": "240000"},
+    }}
+    row = dict(zip(REGISTER_COLUMNS, register_row(result, config)))
+    assert row["Invoice Number"] == "supplier-2"
+    assert row["Date"] == "02/01/2025"
+    assert row["Source file"] == "receipt.pdf"
+    del result["fields"]["supplier_invoice_number"]
+    del result["fields"]["supplier_invoice_date"]
+    row = dict(zip(REGISTER_COLUMNS, register_row(result, config)))
+    assert row["Invoice Number"] is None
+    assert row["Date"] is None
+
+
+def test_reviewer_can_adjust_field_evidence_and_pdf_has_summary(project):
+    import pypdfium2
+    results.save(project, "receipt-a", draft())
+    location = {"page": 1, "box": [0.1, 0.2, 0.4, 0.3]}
+    review = results.save_review(project, "receipt-a", {
+        "revision": results.detail_state(project, "receipt-a")["revision"],
+        "status": "draft", "fields": {}, "rules": {},
+        "evidence": {"fields": {"total_amount": location}, "rules": {}},
+    })
+    assert review["review"]["evidence"]["fields"]["total_amount"] == location
+    from marks import marks_for
+    assert any(mark["box"] == location["box"] for mark in marks_for(review))
+    pdf = common.PROJECTS / project / "results" / review["marked_file"]
+    document = pypdfium2.PdfDocument(str(pdf))
+    assert len(document) >= 2
+    assert document[0].get_width() > 0
+
+
+def test_reversed_rule_requires_reason(project):
+    results.save(project, "receipt-a", draft(stamp="fail"))
+    revision = results.detail_state(project, "receipt-a")["revision"]
+    with pytest.raises(common.WorkspaceError, match="Explain why"):
+        results.save_review(project, "receipt-a", {
+            "revision": revision, "status": "draft", "fields": {}, "rules": {"R3": "passed"},
+            "rule_reasons": {},
+        })

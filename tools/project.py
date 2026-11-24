@@ -4,7 +4,7 @@ Usage:
   ./.tools/uv run tools/project.py list
   ./.tools/uv run tools/project.py show            # what the assistant needs to check invoices
   ./.tools/uv run tools/project.py switch <project>
-  ./.tools/uv run tools/project.py create "<name>" [--copy-rules-from <project>]
+  ./.tools/uv run tools/project.py create "<name>" [--template | --copy-rules-from <project>]
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def _publish_project(name: str, setup: dict) -> str:
     # must not leave a half-created project that blocks a retry.
     with tempfile.TemporaryDirectory(prefix=".new-project-", dir=target.parent) as tmp:
         staging = Path(tmp) / "project"
-        for sub in ("invoices", "results", "guidelines", "evaluation/invoices", "evaluation/latest", "evaluation/runs"):
+        for sub in ("invoices", "results", "guidelines"):
             (staging / sub).mkdir(parents=True)
         for key in ("invoice_types", "fields", "rules", "learnings"):
             save_json(staging / f"{key}.json", setup[key])
@@ -89,7 +89,12 @@ def _publish_project(name: str, setup: dict) -> str:
     return slug
 
 
-def create(name: str, copy_from: str | None) -> str:
+def create(name: str, copy_from: str | None, *, template: bool = False) -> str:
+    if template:
+        if copy_from:
+            raise WorkspaceError("Choose one starting setup for your project.")
+        bundled = Path(__file__).resolve().parents[1] / "templates" / "example-aexcid.json"
+        return import_setup(name, load_json(bundled))
     if copy_from:
         config = load_config(existing_project(copy_from))
         for rule in config["rules"]:
@@ -157,7 +162,9 @@ def main() -> int:
     switch.add_argument("project")
     new = sub.add_parser("create")
     new.add_argument("name")
-    new.add_argument("--copy-rules-from")
+    source = new.add_mutually_exclusive_group()
+    source.add_argument("--copy-rules-from")
+    source.add_argument("--template", action="store_true", help="Start from the bundled AEXCID Template project.")
     args = parser.parse_args()
     try:
         if args.command == "list":
@@ -178,7 +185,7 @@ def main() -> int:
             log(matches[0], "assistant", "project selected", {})
             print_json({"current": matches[0]})
         elif args.command == "create":
-            slug = create(args.name, args.copy_rules_from)
+            slug = create(args.name, args.copy_rules_from, template=args.template)
             set_current_project(slug)
             print_json({"created": slug, "current": slug})
     except WorkspaceError as error:

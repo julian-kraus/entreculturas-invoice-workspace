@@ -17,7 +17,7 @@ def review_lock(slug: str):
         try:
             connection.execute("BEGIN IMMEDIATE")
         except sqlite3.OperationalError as error:
-            raise WorkspaceError("Another invoice operation is busy. Try again shortly.") from error
+            raise WorkspaceError("Another change to this project is in progress. Try again shortly.") from error
         yield
     finally:
         connection.close()

@@ -2,31 +2,31 @@
 
 This folder helps a non-technical team check invoices for grant justification. People work in two places:
 
-- **The chat with you**, for the jobs that need reading and judgment: checking invoices, proposing rules from guidelines, running the test invoices, switching projects.
-- **The workspace page** (`app/`, at http://localhost:8790), for everything else: adding invoices and guidelines, reviewing and correcting results, confirming rules, editing descriptions, test invoices and history.
+- **The chat with you**, for the jobs that need reading and judgment: checking invoices, proposing rules from guidelines and switching projects.
+- **The workspace page** (`app/`, at http://localhost:8790), for everything else: adding invoices and guidelines, reviewing and correcting results, confirming rules, editing descriptions and viewing history.
 
 ## How to work
 
-- Use the skills in this repository: check-invoices, propose-rules, suggest-improvements, run-evaluation, switch-project, open-workspace, invoice-help. Follow their steps exactly.
+- Use the skills in this repository: check-invoices, propose-rules, suggest-improvements, share-rules, add-files, switch-project, open-workspace, invoice-help. Follow their steps exactly.
 - Run tools from the repository root with `./.tools/uv run tools/<tool>.py`. They print JSON or a plain error explaining what to fix.
-- Pin the project for each task that reads or changes project data. Use `tools/project.py list` to resolve the requested project, or take the selected slug when none was named. Set `INVOICE_PROJECT` to that slug on every subsequent tool invocation for the task, including saves and evaluation. On macOS/Linux, prefix each command with `INVOICE_PROJECT=<slug>`. In Windows PowerShell set `$env:INVOICE_PROJECT='<slug>'` in the same invocation. If the request, file and project conflict, clarify before saving.
+- Pin the project for each task that reads or changes project data. Use `tools/project.py list` to resolve the requested project, or take the selected slug when none was named. Set `INVOICE_PROJECT` to that slug on every subsequent tool invocation for the task, including saves. On macOS/Linux, prefix each command with `INVOICE_PROJECT=<slug>`. In Windows PowerShell set `$env:INVOICE_PROJECT='<slug>'` in the same invocation. If the request, file and project conflict, clarify before saving.
 - Speak plainly. The people you help are not technical. Don't show JSON, file paths or commands unless they ask.
 - Keep invoice details in the chat to what the person needs. The invoices contain personal data.
 
 ## What you may change
 
-- **Yes, through the tools:** results (`tools/results.py`), proposed rules (`tools/rules.py`), proposed changes to descriptions (`tools/proposals.py`), the selected project (`tools/project.py`), test invoice runs (`tools/evaluate.py`).
+- **Yes, through the tools:** results (`tools/results.py`), proposed rules (`tools/rules.py`), proposed changes to descriptions (`tools/proposals.py`) and the selected project (`tools/project.py`).
 - **Only when the person asks for it explicitly:** invoice types, fields, rules, learnings and project details. Prefer pointing them to the page, where changes are logged with before and after. If you edit these files directly, describe the change and log it with `common.log` in the same way.
-- **Not without a clear request and a confirmation:** anything in `tools/`, `app/`, `skills/` or this file. If the person asks for such a change, explain what you would change and why, make the change, run `./.tools/uv run pytest tests` and `./.tools/uv run tools/sync_skills.py`, and suggest running the test invoices afterwards.
-- **Never:** delete invoices, results, test invoices or history; send data anywhere outside this computer; push to a remote repository.
+- **Not without a clear request and a confirmation:** anything in `tools/`, `app/`, `skills/` or this file. If the person asks for such a change, explain what you would change and why, make the change and run `./.tools/uv run pytest tests` and `./.tools/uv run tools/sync_skills.py`.
+- **Never:** delete invoices, results or history; send data anywhere outside this computer; push to a remote repository.
 
 ## Where things are
 
-- `projects/<project>/`: `project.json`, `invoice_types.json`, `fields.json`, `rules.json`, `learnings.json`, `invoices/`, `results/`, `guidelines/`, `evaluation/`, `history.jsonl`
+- `projects/<project>/`: `project.json`, `invoice_types.json`, `fields.json`, `rules.json`, `learnings.json`, `invoices/`, `results/`, `guidelines/`, `history.jsonl`
 - `workspace.json`: which project is selected
 - `skills/`: the skills; `tools/sync_skills.py` copies them to `.claude/skills/` and `.agents/skills/`
 
-- `templates/example-aexcid.json`: importable example setup with proposed rules. Staff-owned projects and local assistant preferences stay outside Git.
+- `templates/example-aexcid.json`: bundled Template project with AEXCID invoice types, fields to extract and proposed rules. Staff-owned projects and local assistant preferences stay outside Git.
 
 ## Setup
 
@@ -46,4 +46,4 @@ When someone asks to set things up, opens this folder for the first time, or a t
 
 If the person started from the repository link in an empty folder, first get the files: `git clone <link> .` if git is available, otherwise download `<link>/archive/refs/heads/main.zip` and unpack its contents into this folder. Then do the steps above, and tell them to start a new chat in this folder so the skills load.
 
-Before replacing or removing an installation, close the server and finish any running checks. Preserve the entire `projects/` directory, including confirmed results, history and test answers, plus `workspace.json` and local assistant preferences. Follow the README recovery procedure. Reports and setup exports each contain only a subset of the project.
+Before replacing or removing an installation, close the server and finish any running checks. Preserve the entire `projects/` directory, including confirmed results and history, plus `workspace.json` and local assistant preferences. Follow the README recovery procedure. Reports and setup exports each contain only a subset of the project.

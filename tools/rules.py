@@ -26,12 +26,18 @@ import json
 import sys
 from pathlib import Path
 
+from review_lock import review_lock
 from common import WorkspaceError, current_project, load_config, load_json, log, now_iso, print_json, project_dir, save_json
 
 CHECKS = {"visual", "required", "regex", "range", "enum", "date_in_period"}
 
 
 def propose(slug: str, drafts: list[dict]) -> list[str]:
+    with review_lock(slug):
+        return _propose(slug, drafts)
+
+
+def _propose(slug: str, drafts: list[dict]) -> list[str]:
     config = load_config(slug)
     type_ids = {t["id"] for t in config["invoice_types"]} | {"ALL"}
     fields = {(f["type_id"], f["name"]) for f in config["fields"]}

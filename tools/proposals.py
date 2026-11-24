@@ -24,8 +24,9 @@ import json
 import sys
 from pathlib import Path
 
+from review_lock import review_lock
 from common import (
-    WorkspaceError, current_project, load_config, load_json, log, now_iso, print_json, project_dir, save_json, set_dirs,
+    WorkspaceError, current_project, load_config, load_json, log, now_iso, print_json, project_dir, save_json,
 )
 
 EDITABLE = {
@@ -44,6 +45,11 @@ def pending(slug: str) -> list[dict]:
 
 
 def propose(slug: str, drafts: list[dict], who: str = "assistant") -> list[str]:
+    with review_lock(slug):
+        return _propose(slug, drafts, who)
+
+
+def _propose(slug: str, drafts: list[dict], who: str = "assistant") -> list[str]:
     proposals = load_json(path(slug), [])
     problems, added = [], []
     for index, draft in enumerate(drafts, start=1):
@@ -83,11 +89,30 @@ def propose(slug: str, drafts: list[dict], who: str = "assistant") -> list[str]:
     return [p["id"] for p in added]
 
 
-def decide(slug: str, proposal_id: str, approve: bool, who: str = "staff") -> dict:
+def decide(slug: str, proposal_id: str, approve: bool, who: str = "staff", *,
+           expected: dict | None = None, edits: dict | None = None) -> dict:
     proposals = load_json(path(slug), [])
     proposal = next((p for p in proposals if p["id"] == proposal_id), None)
     if not proposal or proposal.get("status") != "pending":
         raise WorkspaceError("This proposal is no longer waiting for a decision.")
+    if expected is not None and proposal != expected:
+        raise WorkspaceError("This proposal changed since you opened it.")
+    applied = {**proposal["after"], **(edits or {})}
+    if edits:
+        if not approve or not edits.keys() <= proposal["after"].keys():
+            raise WorkspaceError("Edit only the values included in the proposal.")
+        for key, value in edits.items():
+            if key == "required" and not isinstance(value, bool):
+                raise WorkspaceError("Choose whether this field is required.")
+            if key == "kind" and value not in ("text", "date", "amount"):
+                raise WorkspaceError("Choose a valid field kind.")
+            if key == "severity" and value not in ("warning", "error"):
+                raise WorkspaceError("Choose a valid rule severity.")
+            if key in {"name", "label"} and (not isinstance(value, str) or not value.strip()):
+                raise WorkspaceError("Enter a name before confirming.")
+            original = proposal["after"][key]
+            if original is not None and type(original) is not type(value):
+                raise WorkspaceError(f"Keep the value type of {key}.")
     if approve:
         filename, _ = EDITABLE[proposal["kind"]]
         file = project_dir(slug) / filename
@@ -98,21 +123,24 @@ def decide(slug: str, proposal_id: str, approve: bool, who: str = "staff") -> di
         current = {k: item.get(k) for k in proposal["before"]}
         if current != proposal["before"]:
             raise WorkspaceError("Someone changed this item after the proposal was made. Reject it and ask for a new one.")
-        item.update(proposal["after"])
+        item.update(applied)
+        if edits:
+            proposal["reviewed_after"] = applied
         save_json(file, items)
     proposal.update({"status": "approved" if approve else "rejected", "decided_by": who, "decided_at": now_iso()})
     save_json(path(slug), proposals)
     log(slug, who, f"proposal {'approved' if approve else 'rejected'}", {
         "proposal": proposal_id, "what": f"{proposal['kind']} {proposal['target_name']}",
-        "before": proposal["before"], "after": proposal["after"], "reason": proposal["reason"]})
+        "before": proposal["before"], "after": applied, "reason": proposal["reason"],
+        **({"proposed": proposal["after"]} if edits else {})})
     return proposal
 
 
 def corrections(slug: str) -> dict:
-    """What reviewers changed compared with what the assistant read, plus tips and test results."""
+    """Collect review corrections, project tips and pending proposals."""
     config = load_config(slug)
     labels = {(f["type_id"], f["name"]): (f["id"], f["label"]) for f in config["fields"]}
-    _, results_dir = set_dirs(slug, "invoices")
+    results_dir = project_dir(slug) / "results"
     items = []
     for result_file in sorted(results_dir.glob("*.json")) if results_dir.exists() else []:
         result = load_json(result_file, {})
@@ -123,13 +151,13 @@ def corrections(slug: str) -> dict:
             items.append({"invoice": result_file.stem, "type_id": result.get("type_id"), "field_id": field_id,
                           "field": label, "assistant_read": (original.get(name) or {}).get("value"),
                           "reviewer": value, "assistant_note": (original.get(name) or {}).get("note")})
-        for rule_id, outcome in (review.get("rules") or {}).items():
+        decisions = review.get("rules") or {}
+        reasons = review.get("rule_reasons") or {}
+        for rule_id in sorted(decisions.keys() | reasons.keys()):
             items.append({"invoice": result_file.stem, "type_id": result.get("type_id"), "rule_id": rule_id,
-                          "reviewer_outcome": outcome})
-    runs = sorted((project_dir(slug) / "evaluation" / "runs").glob("*.json"))
-    latest = load_json(runs[-1], {}) if runs else {}
+                          "reviewer_outcome": decisions.get(rule_id), "reviewer_reason": reasons.get(rule_id)})
     return {"corrections": items, "learnings": config["learnings"],
-            "test_invoice_differences": latest.get("invoices", []), "pending_proposals": pending(slug)}
+            "pending_proposals": pending(slug)}
 
 
 def main() -> int:

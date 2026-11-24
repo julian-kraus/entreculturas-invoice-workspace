@@ -17,7 +17,6 @@ PROJECTS = ROOT / "projects"
 WORKSPACE_FILE = ROOT / "workspace.json"
 
 INVOICE_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
-SETS = ("invoices", "evaluation")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,80}$")
 
 
@@ -110,18 +109,10 @@ def project_dir(slug: str) -> Path:
     return PROJECTS / check_id(slug, "project")
 
 
-def set_dirs(slug: str, which: str) -> tuple[Path, Path]:
-    """Return (folder with invoice files, folder with results) for 'invoices' or 'evaluation'."""
-    if which not in SETS:
-        raise WorkspaceError(f"Unknown set '{which}'.")
+def invoice_files(slug: str) -> dict[str, Path]:
     base = project_dir(slug)
-    if which == "invoices":
-        return base / "invoices", base / "results"
-    return base / "evaluation" / "invoices", base / "evaluation" / "latest"
-
-
-def invoice_files(slug: str, which: str = "invoices") -> dict[str, Path]:
-    folder, results = set_dirs(slug, which)
+    folder = base / "invoices"
+    results = base / "results"
     if not folder.exists():
         return {}
     groups: dict[str, list[Path]] = {}
@@ -129,14 +120,8 @@ def invoice_files(slug: str, which: str = "invoices") -> dict[str, Path]:
         if path.suffix.lower() in INVOICE_SUFFIXES and path.is_file():
             groups.setdefault(slugify(path.stem), []).append(path)
 
-    # The evaluation set can contain only one of a pair of same-stem originals.
-    # Keep its ID even after evaluation/latest is cleared for the next run.
-    if which == "evaluation":
-        originals = {p.name: key for key, p in invoice_files(slug).items()}
-    else:
-        originals = {}
     files = {}
-    reserved = set(groups) | set(originals.values())
+    reserved = set(groups)
     for stem, paths in groups.items():
         recorded = load_json(folder / ".upload-names" / f"{stem}.json", {}) or {}
         preferred = recorded.get("file")
@@ -145,10 +130,8 @@ def invoice_files(slug: str, which: str = "invoices") -> dict[str, Path]:
             preferred = previous.get("file")
         owner = next((p for p in paths if p.name == preferred), paths[-1])
         for path in paths:
-            key = originals.get(path.name)
-            if key is None and path == owner and (which != "evaluation" or stem not in originals.values()):
-                key = stem
-            if key is None:
+            key = stem
+            if path != owner:
                 # Older versions indexed by stem alone. Keep their original entry
                 # and give every shadowed file a repeatable, filename-based ID.
                 digest = hashlib.sha256(path.name.encode()).hexdigest()
@@ -160,27 +143,26 @@ def invoice_files(slug: str, which: str = "invoices") -> dict[str, Path]:
     return files
 
 
-def invoice_display_name(slug: str, invoice_id: str, which: str = "invoices", *, source: Path | None = None) -> str:
-    source = source or invoice_path(slug, invoice_id, which)
-    folder, _ = set_dirs(slug, "invoices")
+def invoice_display_name(slug: str, invoice_id: str, *, source: Path | None = None) -> str:
+    source = source or invoice_path(slug, invoice_id)
+    folder = project_dir(slug) / "invoices"
     meta = load_json(folder / ".upload-names" / f"{check_id(invoice_id, 'invoice')}.json", {}) or {}
     return meta.get("original", source.name) if meta.get("file") == source.name else source.name
 
 
-def invoice_path(slug: str, invoice_id: str, which: str = "invoices") -> Path:
-    files = invoice_files(slug, which)
+def invoice_path(slug: str, invoice_id: str) -> Path:
+    files = invoice_files(slug)
     if invoice_id not in files:
         raise WorkspaceError(f"No invoice '{invoice_id}' in this project.")
     return files[invoice_id]
 
 
-def result_path(slug: str, invoice_id: str, which: str = "invoices") -> Path:
-    _, results = set_dirs(slug, which)
-    return results / f"{check_id(invoice_id, 'invoice')}.json"
+def result_path(slug: str, invoice_id: str) -> Path:
+    return project_dir(slug) / "results" / f"{check_id(invoice_id, 'invoice')}.json"
 
 
-def work_dir(slug: str, invoice_id: str, which: str = "invoices") -> Path:
-    return project_dir(slug) / "work" / which / check_id(invoice_id, "invoice")
+def work_dir(slug: str, invoice_id: str) -> Path:
+    return project_dir(slug) / "work" / "invoices" / check_id(invoice_id, "invoice")
 
 
 def load_config(slug: str) -> dict:

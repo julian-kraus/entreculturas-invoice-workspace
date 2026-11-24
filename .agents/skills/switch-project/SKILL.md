@@ -9,6 +9,6 @@ Work from the repository root.
 
 - List projects: `./.tools/uv run tools/project.py list`. Say which one is selected and how many invoices each has.
 - Switch: `./.tools/uv run tools/project.py switch "<name or part of it>"`. If several match, ask which one.
-- Create: `./.tools/uv run tools/project.py create "<name>"`. To start from another project's invoice types and rules, add `--copy-rules-from <project>`. Copied rules start as proposed, so tell the person to confirm them on the workspace page.
+- Create: `./.tools/uv run tools/project.py create "<name>"`. To use the bundled Template project, add `--template`. It includes AEXCID invoice types, fields to extract and proposed rules. To copy a local project's types, fields and rules, add `--copy-rules-from <project>`. Previously confirmed rules from a local project become proposed in the copy. Ask the person to review the proposals in Project setup → Inbox.
 
 After switching or creating, confirm the selected project in one sentence. The workspace page shows the same selection after a refresh.

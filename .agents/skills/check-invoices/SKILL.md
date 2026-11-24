@@ -33,7 +33,7 @@ c. Read every field of that type. Copy values as written on the document, keepin
 
 d. For each rule in `visual_rules_to_judge` that belongs to this type, decide `pass`, `fail` or `unclear`, with one sentence quoting what you saw. Use `unclear` when you cannot tell. Never pass a rule you could not see evidence for.
 
-e. Mark the evidence, only where a rule needs it: each found field that a confirmed rule of this type checks (the rule's `field`), and each visual verdict that points at something on the page (a stamp, a signature, a payment note). Other fields are read but not marked. On each page that has items:
+e. Mark evidence for every extracted field whose location you can confirm, and each visual verdict that points at something on the page (a stamp, a signature, a payment note). On each page that has items:
    1. `./.tools/uv run tools/grid.py grid <page image>` and look at the grid image. Note a cell range (like `J8:K9`) that covers each item completely.
    2. Write those ranges to `spec.json` in the invoice's work folder, e.g. `{"total_amount": "J8:K8", "R_VOL_101": "E6:I8"}`, run `./.tools/uv run tools/grid.py sheet <page image> <spec.json>` and look at the sheet. For each item, choose the sub-range (`a1` to `d4`) that tightly covers it.
    3. Write `{"total_amount": {"cells": "J8:K8", "sub": "a2:d3"}, ...}` to the spec, run `./.tools/uv run tools/grid.py finalize <page image> <spec.json>` and look at the check image. Each value must sit fully inside its red frame.
@@ -54,4 +54,3 @@ Reply in plain words, per invoice: the status, any failed rules, and your questi
 
 - Apply only the confirmed rules from step 1. Do not add your own rules.
 - Do not edit rules, descriptions, tools or the page. If a rule or description looks wrong, say so in your reply instead.
-- To check test invoices, the run-evaluation skill uses these same steps with `--set evaluation` on `pages.py` and `results.py`.

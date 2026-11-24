@@ -33,7 +33,7 @@ SETTINGS_FILE = ROOT / "assistant-settings.local.json"
 CLAUDE_SETTINGS = ROOT / ".claude" / "settings.json"
 CODEX_CONFIG = ROOT / ".codex" / "config.toml"
 
-JOBS = {"check-invoices": "reading", "run-evaluation": "reading", "propose-rules": "rules", "suggest-improvements": "rules"}
+JOBS = {"check-invoices": "reading", "propose-rules": "rules", "suggest-improvements": "rules"}
 CLAUDE_MODELS = ("haiku", "sonnet", "opus")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_SETTINGS = {

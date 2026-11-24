@@ -1,5 +1,5 @@
 import {
-  api, askConfirm, button, confirmLeave, copyText, el, notify, pill, projectUrl, promptButton, state, when
+  api, askConfirm, button, confirmLeave, el, notify, pill, projectUrl, promptButton, state, when
 } from "./workspace.js";
 
 const STATUS_LABEL = {
@@ -11,10 +11,72 @@ const STATUS_LABEL = {
 };
 const OUTCOME_LABEL = { passed: "Passed", failed: "Failed", unclear: "Unclear", not_applicable: "Does not apply" };
 
-export async function loadInvoices() {
-  const invoices = await api("GET", "/api/invoices");
-  state.invoices = invoices;
-  renderInvoiceList();
+let invoiceScope = 0;
+let loadedProject = null;
+let loadingRequest = null;
+
+function currentInvoiceScope(project, scope) {
+  return project && project === state.current && scope === invoiceScope && state.tab === "invoices";
+}
+
+export function clearInvoices() {
+  invoiceScope++;
+  loadedProject = null;
+  loadingRequest = null;
+  Object.assign(state, { invoices: [], selected: null, detail: null, listScroll: 0 });
+  state.detailRequest++;
+  displayInvoiceView(false);
+  document.getElementById("invoice-detail").replaceChildren();
+  document.getElementById("invoice-count").textContent = "";
+  document.getElementById("invoice-list").replaceChildren();
+  const batch = document.getElementById("pending-batch");
+  batch.hidden = true;
+  document.getElementById("pending-copy").disabled = true;
+  document.getElementById("pending-summary").textContent = "";
+}
+
+export async function loadInvoices({ poll = false } = {}) {
+  const project = state.current;
+  const scope = invoiceScope;
+  if (!currentInvoiceScope(project, scope) || (poll && loadingRequest)) return false;
+  const request = {};
+  loadingRequest = request;
+  const current = () => loadingRequest === request && currentInvoiceScope(project, scope);
+  const list = document.getElementById("invoice-list");
+  const previous = state.invoices;
+  const selected = state.selected;
+  if (!poll && loadedProject !== project) {
+    list.replaceChildren(el("li", { class: "empty", role: "status", text: "Loading invoices…" }));
+  }
+  try {
+    const invoices = await api("GET", "/api/invoices", undefined, project);
+    if (!current()) return false;
+    if (loadedProject !== project || JSON.stringify(invoices) !== JSON.stringify(previous)) {
+      state.invoices = invoices;
+      loadedProject = project;
+      renderInvoiceList(project, scope);
+    }
+    const selectedItem = items => items.find(invoice => invoice.id === selected);
+    if (poll && selected && selected === state.selected && !state.reviewDirty &&
+        JSON.stringify(selectedItem(invoices)) !== JSON.stringify(selectedItem(previous))) {
+      await selectInvoice(selected, true, project);
+    }
+    return current();
+  } catch (error) {
+    if (!current()) return false;
+    if (!poll && loadedProject !== project) {
+      const retry = button("Try again", () => {
+        if (currentInvoiceScope(project, scope)) return loadInvoices();
+      });
+      list.replaceChildren(el("li", { class: "empty" },
+        el("p", { role: "status", text: "Could not load invoices for this project." }), retry));
+    } else if (!poll) {
+      notify(error.message, true);
+    }
+    return loadedProject === project;
+  } finally {
+    if (loadingRequest === request) loadingRequest = null;
+  }
 }
 
 export function displayInvoiceView(showDetail) {
@@ -23,41 +85,61 @@ export function displayInvoiceView(showDetail) {
 }
 
 export async function backToList() {
+  const project = state.current;
+  const scope = invoiceScope;
   if (state.reviewDirty && !(await confirmLeave())) return;
+  if (!currentInvoiceScope(project, scope)) return;
   const id = state.selected;
   Object.assign(state, { selected: null, detail: null, reviewDirty: false });
   state.detailRequest++;
   displayInvoiceView(false);
   await loadInvoices();
+  if (!currentInvoiceScope(project, scope) || state.selected) return;
   document.querySelector(`[data-invoice-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
   window.scrollTo(0, state.listScroll);
 }
 
-export function renderInvoiceList() {
+function renderInvoiceList(project, scope) {
   const pending = state.invoices.filter(i => !i.checked_at);
-  document.getElementById("invoice-count").textContent = `${state.invoices.length} total · ${pending.length} awaiting a check`;
-  document.getElementById("report-btn").disabled = !state.invoices.some(i => i.checked_at);
+  document.getElementById("invoice-count").textContent = `${state.invoices.length} total`;
   document.getElementById("pending-batch").hidden = !pending.length;
-  document.getElementById("pending-summary").textContent = `Check ${pending.length} pending invoice${pending.length === 1 ? "" : "s"}`;
-  document.getElementById("pending-files").replaceChildren(...pending.map(i => el("li", { text: i.file })));
+  document.getElementById("pending-copy").disabled = !pending.length;
+  document.getElementById("pending-copy").textContent = pending.length === 1 ? "Copy check request" : "Copy check request for all";
+  document.getElementById("pending-summary").textContent = `${pending.length} pending invoice${pending.length === 1 ? "" : "s"}`;
   const list = document.getElementById("invoice-list");
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.invoiceId : null;
   if (!state.invoices.length) {
     list.replaceChildren(el("li", { class: "empty", text: "Add your first invoice to start a check." }));
     return;
   }
   list.replaceChildren(...state.invoices.map(inv => el("li", {},
-    el("button", { type: "button", "data-invoice-id": inv.id, onclick: () => selectInvoice(inv.id) },
+    el("button", { type: "button", "data-invoice-id": inv.id, onclick: () => {
+      if (currentInvoiceScope(project, scope)) return selectInvoice(inv.id, false, project);
+    } },
       el("span", { class: "name", text: inv.file }),
       el("span", { class: "tags" }, pill(STATUS_LABEL[inv.status] || inv.status, inv.status),
         inv.reviewed ? pill("Reviewed", "reviewed") : null,
         inv.pending_recheck ? pill("Recheck awaiting review", "unclear") : null),
       el("span", { class: "chevron", "aria-hidden": true, text: "›" })))));
+  if (focused) list.querySelector(`[data-invoice-id="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
 }
 
-export async function selectInvoice(id, refresh = false) {
+function invoiceHeader(filename, ...actions) {
+  const listButton = el("button", { type: "button", class: "ghost back-button", onclick: backToList,
+    "aria-label": "Back to invoices", title: "Back to invoices", text: "←" });
+  return el("header", { class: "invoice-header" },
+    el("div", { class: "back-heading" }, listButton,
+      el("h2", { class: "page-title", tabindex: "-1", text: filename })),
+    actions.length ? el("div", { class: "action-row" }, actions) : null);
+}
+
+export async function selectInvoice(id, refresh = false, project = state.current) {
+  const scope = invoiceScope;
+  if (!currentInvoiceScope(project, scope)) return;
   if (id !== state.selected && state.reviewDirty && !(await confirmLeave())) return;
+  if (!currentInvoiceScope(project, scope)) return;
   const request = ++state.detailRequest;
-  const current = () => request === state.detailRequest && state.selected === id && state.tab === "invoices";
+  const current = () => request === state.detailRequest && state.selected === id && currentInvoiceScope(project, scope);
   if (!refresh) {
     state.listScroll = window.scrollY;
     state.reviewView = "findings";
@@ -67,16 +149,21 @@ export async function selectInvoice(id, refresh = false) {
   state.selected = id;
   displayInvoiceView(true);
   const detail = document.getElementById("invoice-detail");
-  if (!refresh || !state.detail) detail.replaceChildren(button("Back to invoices", backToList), el("p", { class: "empty", text: "Loading invoice…" }));
+  const filename = state.invoices.find(invoice => invoice.id === id)?.file || id;
+  if (!refresh || !state.detail) detail.replaceChildren(invoiceHeader(filename), el("p", { class: "empty", role: "status", text: "Loading invoice…" }));
   try {
-    const [data, config] = await Promise.all([api("GET", `/api/result/${encodeURIComponent(id)}`), api("GET", "/api/config")]);
+    const [data, config] = await Promise.all([
+      api("GET", `/api/result/${encodeURIComponent(id)}`, undefined, project),
+      api("GET", "/api/config", undefined, project),
+    ]);
     if (!current() || state.reviewDirty) return;
     state.detail = data;
     state.config = config;
-    renderDetail();
+    renderDetail(filename);
   } catch (error) {
-    if (current()) detail.replaceChildren(button("Back to invoices", backToList), el("p", { class: "empty", text: error.message }));
+    if (current() && !state.reviewDirty) detail.replaceChildren(invoiceHeader(filename), el("p", { class: "empty", role: "alert", text: error.message }));
   }
+  if (!refresh && current() && document.activeElement === document.body) detail.querySelector(".page-title").focus({ preventScroll: true });
 }
 
 function confirmedValue(result, name) {
@@ -99,27 +186,34 @@ function candidatePanel(official, candidate, project, invoiceId) {
   for (const rule of proposed.rule_results || []) {
     const old = previous.get(rule.rule_id);
     add(rule.name, old ? OUTCOME_LABEL[old.outcome] : null, OUTCOME_LABEL[rule.outcome]);
+    add(`${rule.name} · reason`, old?.message, rule.message);
     previous.delete(rule.rule_id);
   }
   for (const rule of previous.values()) add(rule.name, OUTCOME_LABEL[rule.outcome], null);
   const revision = state.detail.revision;
+  const scope = invoiceScope;
   const accept = button("Accept and confirm recheck", async () => {
+    if (!currentInvoiceScope(project, scope) || state.selected !== invoiceId) return;
     if (state.reviewDirty) { notify("Save or discard your current edits before accepting the recheck.", true); return; }
     if (!(await askConfirm("Replace the confirmed decision with this recheck? The previous confirmation will be kept in the invoice history.", "Accept recheck"))) return;
+    if (!currentInvoiceScope(project, scope) || state.selected !== invoiceId) return;
     accept.disabled = true;
     try {
       await api("POST", `/api/result/${encodeURIComponent(invoiceId)}/accept-recheck`, { revision, candidate_revision: candidate.revision }, project);
+      if (!currentInvoiceScope(project, scope)) return;
       notify("Recheck accepted. Exports now use the new confirmation.");
-      if (state.selected === invoiceId) await selectInvoice(invoiceId, true);
-      await loadInvoices();
-    } catch (error) { notify(error.message, true); } finally { accept.disabled = false; }
+      if (state.selected === invoiceId) await selectInvoice(invoiceId, true, project);
+      if (currentInvoiceScope(project, scope)) await loadInvoices();
+    } catch (error) {
+      if (currentInvoiceScope(project, scope)) notify(error.message, true);
+    } finally { accept.disabled = false; }
   }, "primary");
   return el("section", { class: "candidate-panel" }, el("h3", { text: "Recheck awaiting review" }),
     el("p", { text: "Exports continue to use the confirmed decision until you accept this recheck." }),
     differences.length ? el("div", { class: "table-wrap" }, el("table", { class: "plain" },
       el("thead", {}, el("tr", {}, ["Change", "Confirmed", "Recheck"].map(t => el("th", { text: t })))),
       el("tbody", {}, differences.map(row => el("tr", {}, row.map(value => el("td", { text: String(value) }))))))) :
-      el("p", { text: "The document type, values, status and rule decisions match the confirmation." }),
+      el("p", { text: "The document type, values, status, rule decisions and reasons match the confirmation." }),
     el("details", {}, el("summary", { text: "Inspect recheck evidence and explanations" }),
       proposed.summary ? el("p", { text: proposed.summary }) : null,
       proposed.type_reason ? el("p", { text: proposed.type_reason }) : null,
@@ -129,26 +223,15 @@ function candidatePanel(official, candidate, project, invoiceId) {
     accept);
 }
 
-function renderDetail() {
-  const { result, pages, marks, candidate, confirmed_row } = state.detail;
+function renderDetail(filename) {
+  const { result, pages, marks, candidate } = state.detail;
   const id = state.selected, project = state.current;
-  const invoice = state.invoices.find(i => i.id === id);
-  const projectName = state.projects.find(p => p.slug === project)?.name || project;
   const basePrompt = `invoice "${id}" in project "${project}"`;
-  const actions = el("div", { class: "action-row" },
-    promptButton(result ? "Copy recheck request" : "Copy check request",
-      `${result ? "Recheck" : "Check"} ${basePrompt} against this project's confirmed rules.`));
-  if (result) {
-    const marked = state.detail.marked_pdf_url;
-    if (marked) actions.append(el("a", { class: "ghost-link", href: projectUrl(marked, project), text: "Download marked PDF" }));
-    if (confirmed_row) actions.append(button("Copy confirmed row", () => {
-      const line = confirmed_row.map(v => String(v ?? "").replace(/[\t\r\n]+/g, " ")).join("\t");
-      copyText(line, "Confirmed row copied in workbook column order.");
-    }));
-  }
-  const header = el("header", { class: "invoice-header" },
-    button("‹ Back to invoices", backToList, "link"), el("p", { class: "project-name", text: projectName }),
-    el("h1", { text: invoice?.file || id }), actions);
+  const checkRequest = promptButton(result ? "Copy recheck request" : "Copy check request",
+    `${result ? "Recheck" : "Check"} ${basePrompt} against this project's confirmed rules.`);
+  const exportAction = result ? el("button", { type: "button", class: "ghost", text: "Export", "aria-haspopup": "dialog",
+    "data-export-invoice": id, "data-export-project": project }) : null;
+  const header = invoiceHeader(filename, exportAction, checkRequest);
   const container = document.getElementById("invoice-detail");
   if (!result) {
     container.replaceChildren(header, el("p", { text: "Paste the check request into your project chat. The findings will appear here." }), viewer(pages, []));
@@ -156,16 +239,21 @@ function renderDetail() {
   }
   const type = state.config.invoice_types.find(t => t.id === result.type_id)?.name || result.type_id;
   const count = result.rules_checked ?? (result.rule_results || []).filter(r => r.rule_id !== "DUPLICATE_NUMBER").length;
-  const summary = el("section", { class: "review-summary" },
-    el("div", { class: "tags" }, pill(STATUS_LABEL[result.status] || result.status, result.status),
-      pill(result.review?.status === "confirmed" ? "Reviewed" : "Awaiting confirmation", ""),
-      el("span", { class: "muted", text: `${count} rule${count === 1 ? "" : "s"} checked` })),
-    el("p", {}, el("b", { text: type }), result.type_reason ? ` · ${result.type_reason}` : ""),
-    result.summary ? el("p", { text: result.summary }) : null,
-    result.questions?.length ? el("div", { class: "questions" }, el("b", { text: "Questions from the check" }),
-      el("ul", {}, result.questions.map(q => el("li", { text: q })))) : null);
-  const findings = findingsList(result, marks, basePrompt);
-  const values = fieldsTable(result, marks);
+  const description = el("div", { class: "invoice-description" },
+    type ? el("p", { class: "invoice-type", text: type }) : null,
+    result.type_reason ? el("p", { text: result.type_reason }) : null,
+    result.summary ? el("p", { text: result.summary }) : null);
+  const questions = result.questions?.length ? [el("section", { class: "questions", "aria-labelledby": "invoice-questions" },
+    el("h3", { id: "invoice-questions", text: "Questions from the check" }),
+    el("ul", {}, result.questions.map(q => el("li", { text: q }))))] : [];
+  const reviewStatus = result.review?.status;
+  const reviewLabel = reviewStatus === "confirmed" ? "Reviewed" : reviewStatus === "draft" ? "Draft saved" : "Awaiting confirmation";
+  const status = el("div", { class: "tags review-state" },
+    pill(STATUS_LABEL[result.status] || result.status, result.status),
+    pill(reviewLabel, reviewStatus === "confirmed" ? "reviewed" : ""),
+    el("span", { class: "muted small", text: `${count} rule${count === 1 ? "" : "s"} checked` }));
+  const findings = findingsList(result, marks, pages, basePrompt);
+  const values = fieldsTable(result, marks, pages);
   const switchView = name => {
     state.reviewView = name;
     findings.hidden = name !== "findings";
@@ -176,62 +264,282 @@ function renderDetail() {
   const findingsButton = button("Rule findings", () => switchView("findings"));
   const valuesButton = button("Extracted values", () => switchView("values"));
   switchView(state.reviewView);
-  const review = el("div", { class: "review-detail" },
+  const review = el("section", { class: "review-detail", "aria-label": "Rule findings and extracted values",
+    tabindex: pages?.length ? "0" : undefined },
     el("div", { class: "view-tabs", role: "group", "aria-label": "Review content" }, findingsButton, valuesButton),
-    findings, values, reviewBox(result));
-  container.replaceChildren(header, summary,
+    status, findings, values);
+  const returnToCard = mark => {
+    const selector = `[data-evidence-mark="${mark.number}"]`;
+    const list = state.reviewView === "findings" ? findings : values;
+    const control = list.querySelector(selector) || review.querySelector(selector);
+    if (!control) return;
+    if (!list.contains(control)) switchView(findings.contains(control) ? "findings" : "values");
+    control.focus({ preventScroll: true });
+    control.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
+  container.replaceChildren(header, description, ...questions,
     ...(candidate ? [candidatePanel(result, candidate, project, id)] : []),
-    el("div", { class: "detail-grid" }, review, viewer(pages, marks)));
+    el("div", { class: pages?.length ? "detail-grid has-pages" : "detail-grid" },
+      review, viewer(pages, marks, "invoice", returnToCard)), reviewBox(result));
 }
 
-function evidenceControl(mark) {
-  if (!mark) return el("span", { class: "small muted", text: "No evidence marked" });
-  const link = button(`Show mark ${mark.number} · page ${mark.page}`, () => {
-    const target = document.getElementById(`invoice-mark-${mark.number}`);
-    if (!target) return;
-    for (const box of document.querySelectorAll(".mark.hilite")) box.classList.remove("hilite");
+function evidenceHeading(card, name, mark, page, pages) {
+  if (!Number.isInteger(page) || !pages?.[page - 1]) {
+    return el("div", { class: "evidence-heading" }, el("b", { text: name }),
+      el("span", { class: "evidence-location", text: "No evidence marked" }));
+  }
+  const targetId = mark ? `invoice-mark-${mark.number}` : `invoice-page-${page}`;
+  const control = button(name, () => {
+    const detail = card.closest(".invoice-detail");
+    const target = document.getElementById(targetId);
+    if (!detail || !target) return;
+    detail.querySelector(".evidence-title[aria-pressed=true]")?.setAttribute("aria-pressed", "false");
+    detail.querySelector(".document-viewer .hilite")?.classList.remove("hilite");
+    control.setAttribute("aria-pressed", "true");
     target.classList.add("hilite");
     target.scrollIntoView({ block: "center", inline: "nearest" });
-    document.querySelectorAll(".evidence-select[aria-pressed=true]").forEach(b => b.setAttribute("aria-pressed", "false"));
-    link.setAttribute("aria-pressed", "true");
-  }, "evidence-select");
-  link.setAttribute("aria-pressed", "false");
-  return link;
+  }, "evidence-title");
+  control.setAttribute("aria-label", `${name}, go to page ${page}${mark ? `, mark ${mark.number}` : ""}`);
+  control.setAttribute("aria-controls", targetId);
+  control.setAttribute("aria-pressed", "false");
+  if (mark) control.dataset.evidenceMark = mark.number;
+  card.classList.add("evidence-card");
+  card.addEventListener("click", event => {
+    if (event.defaultPrevented || event.target.closest("a, button, label, input, select, textarea, summary, [contenteditable]")) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && selection.containsNode(card, true)) return;
+    control.focus({ preventScroll: true });
+    control.click();
+  });
+  return el("div", { class: "evidence-heading" }, control,
+    el("span", { class: "evidence-location", text: `Page ${page}${mark ? ` · #${mark.number}` : ""}` }));
 }
 
-function editControl(label, input, caption) {
-  const wrapper = el("div", { class: "inline-edit" });
-  const control = button(label, () => {
-    editor.hidden = !editor.hidden;
-    control.setAttribute("aria-expanded", String(!editor.hidden));
-    if (!editor.hidden) input.focus();
+function editEvidence(group, key, name, location, pages) {
+  const edit = button("Move mark", () => {
+    const saved = state.detail.result.review?.evidence?.[group]?.[key] || location;
+    const originalPage = saved?.page || 1;
+    const originalBox = saved?.box ? [...saved.box] : null;
+    let box = originalBox ? [...originalBox] : null;
+    let zoom = 1;
+    let gesture = null;
+    const dialog = el("dialog", { class: "mark-editor", "aria-label": `Move mark for ${name}` },
+      el("h2", { text: `Move mark for ${name}` }),
+      el("p", { class: "small muted", text: "Drag on the page to draw a box. Drag inside the box to move it, or drag a corner to resize it." }));
+    const page = el("select", { "aria-label": "Evidence page" },
+      pages.map((_, i) => el("option", { value: String(i + 1), text: `Page ${i + 1}` })));
+    page.value = String(originalPage);
+    const canvas = el("div", { class: "mark-editor-canvas" });
+    const image = el("img", { alt: "Document page for selecting evidence", draggable: false });
+    const rectangle = el("div", { class: "mark-editor-selection", hidden: true, "aria-hidden": "true" });
+    for (const corner of ["nw", "ne", "sw", "se"]) {
+      rectangle.append(el("span", { class: `mark-editor-handle ${corner}`, "data-corner": corner }));
+    }
+    canvas.append(image, rectangle);
+    const viewport = el("div", { class: "mark-editor-viewport", tabindex: "0", "aria-label": "Document page. Scroll to view the page." }, canvas);
+    const message = el("p", { class: "dialog-error", role: "status" });
+    const coordinates = ["Left", "Top", "Right", "Bottom"].map(label =>
+      el("input", { type: "number", min: "0", max: "100", step: "0.1", "aria-label": `${label} percentage` }));
+    const syncInputs = () => coordinates.forEach((input, i) => {
+      input.value = box ? String(Math.round(box[i] * 1000) / 10) : "";
+    });
+    function renderBox() {
+      rectangle.hidden = !box;
+      if (box) Object.assign(rectangle.style, { left: `${box[0] * 100}%`, top: `${box[1] * 100}%`,
+        width: `${(box[2] - box[0]) * 100}%`, height: `${(box[3] - box[1]) * 100}%` });
+    }
+    function loadPage() {
+      image.src = projectUrl(pages[Number(page.value) - 1]);
+      box = Number(page.value) === originalPage && originalBox ? [...originalBox] : null;
+      syncInputs();
+      renderBox();
+      viewport.scrollTop = 0;
+      message.textContent = "";
+    }
+    page.addEventListener("change", loadPage);
+    function point(event) {
+      const rect = image.getBoundingClientRect();
+      return [Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+        Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))];
+    }
+    canvas.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const corner = event.target.dataset.corner;
+      const start = point(event);
+      gesture = { start, initial: box ? [...box] : null, mode: corner || (event.target === rectangle ? "move" : "draw") };
+      if (gesture.mode === "draw") box = [start[0], start[1], start[0], start[1]];
+      canvas.setPointerCapture(event.pointerId);
+      renderBox();
+    });
+    canvas.addEventListener("pointermove", event => {
+      if (!gesture) return;
+      const end = point(event);
+      const { start, initial, mode } = gesture;
+      if (mode === "draw") box = [Math.min(start[0], end[0]), Math.min(start[1], end[1]), Math.max(start[0], end[0]), Math.max(start[1], end[1])];
+      else if (mode === "move") {
+        const dx = Math.max(-initial[0], Math.min(1 - initial[2], end[0] - start[0]));
+        const dy = Math.max(-initial[1], Math.min(1 - initial[3], end[1] - start[1]));
+        box = [initial[0] + dx, initial[1] + dy, initial[2] + dx, initial[3] + dy];
+      } else {
+        const oppositeX = mode.includes("w") ? initial[2] : initial[0];
+        const oppositeY = mode.includes("n") ? initial[3] : initial[1];
+        box = [Math.min(end[0], oppositeX), Math.min(end[1], oppositeY), Math.max(end[0], oppositeX), Math.max(end[1], oppositeY)];
+      }
+      syncInputs();
+      renderBox();
+    });
+    const endGesture = () => { gesture = null; };
+    canvas.addEventListener("pointerup", endGesture);
+    canvas.addEventListener("pointercancel", endGesture);
+    coordinates.forEach(input => input.addEventListener("input", () => {
+      box = coordinates.every(item => item.value !== "") ? coordinates.map(item => Number(item.value) / 100) : null;
+      renderBox();
+    }));
+    const zoomLabel = el("span", { text: "100%" });
+    const changeZoom = amount => {
+      zoom = Math.max(1, Math.min(3, zoom + amount));
+      canvas.style.width = `${zoom * 100}%`;
+      zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+    };
+    const toolbar = el("div", { class: "mark-editor-toolbar" },
+      el("label", {}, "Page", page),
+      el("div", { class: "mark-editor-zoom", role: "group", "aria-label": "Page zoom" },
+        button("−", () => changeZoom(-0.5)), zoomLabel, button("+", () => changeZoom(0.5))));
+    const precise = el("details", { class: "mark-editor-precise" },
+      el("summary", { text: "Adjust coordinates" }),
+      el("p", { class: "small muted", text: "Enter the box edges as percentages of the page. Use the arrow keys for fine adjustments." }),
+      el("div", { class: "grid2" }, coordinates.map((input, i) =>
+        el("label", {}, `${["Left", "Top", "Right", "Bottom"][i]} (%)`, input))));
+    const actions = el("div", { class: "mark-editor-actions" },
+      button("Cancel", () => dialog.close()),
+      button("Use this location", () => {
+        if (!box || box.some(v => !Number.isFinite(v) || v < 0 || v > 1) || box[2] - box[0] < .002 || box[3] - box[1] < .002) {
+          message.textContent = "Draw a box around the evidence, or enter all four valid coordinates.";
+          return;
+        }
+        const review = state.detail.result.review ||= {};
+        const evidence = review.evidence ||= { fields: {}, rules: {} };
+        (evidence[group] ||= {})[key] = { page: Number(page.value), box: [...box] };
+        state.reviewDirty = true;
+        dialog.close();
+        notify("Location changed. Save or confirm your review to apply it.");
+      }, "primary"));
+    dialog.append(toolbar, viewport, precise, message, actions);
+    dialog.addEventListener("close", () => { dialog.remove(); edit.focus(); }, { once: true });
+    document.getElementById("invoice-detail").append(dialog);
+    loadPage();
+    dialog.showModal();
   }, "link");
-  const editor = el("label", { hidden: true }, caption, input);
-  control.setAttribute("aria-expanded", "false");
-  wrapper.append(control, editor);
-  return wrapper;
+  return edit;
 }
 
-function findingsList(result, marks, basePrompt) {
-  const overrides = result.review?.rules || {};
-  const items = (result.rule_results || []).map(r => {
-    const mark = marks.find(m => m.label === r.name && m.kind === r.outcome && (!r.evidence?.box || (m.page === r.evidence.page && m.box.join() === r.evidence.box.join())));
-    const select = el("select", { "aria-label": `Decision for ${r.name}`, "data-rule": r.rule_id, onchange: () => { state.reviewDirty = true; } },
-      el("option", { value: "", text: `Use assistant decision (${OUTCOME_LABEL[r.ai_outcome || r.outcome] || r.outcome})` }),
-      el("option", { value: "passed", text: "Passed" }), el("option", { value: "failed", text: "Failed" }));
-    select.value = overrides[r.rule_id] || "";
-    return el("li", { class: `finding ${r.outcome}` },
-      el("div", { class: "top" }, el("b", { text: r.name }), pill(OUTCOME_LABEL[r.outcome] || r.outcome, r.outcome)),
-      r.message ? el("p", { text: r.message }) : null,
-      r.overridden ? el("p", { class: "small", text: "Changed by reviewer" }) : null,
-      el("div", { class: "action-row small" }, evidenceControl(mark),
-        promptButton("Copy question", `Explain the finding "${r.name}" (rule "${r.rule_id}") for ${basePrompt}${mark ? ` at mark ${mark.number} on page ${mark.page}` : ""}. Verify the evidence and explain any uncertainty.`)),
-      r.rule_id === "DUPLICATE_NUMBER" ? null : editControl("Change decision", select, "Decision for this invoice"));
+function findingCard(rule, review, mark, page, pages, basePrompt) {
+  const card = el("li", { class: `finding ${rule.outcome}` });
+  const decision = el("div", { class: "finding-outcome" });
+  card.append(evidenceHeading(card, rule.name, mark, page, pages), decision);
+  const key = rule.rule_id;
+  if (key === "DUPLICATE_NUMBER") {
+    decision.append(pill(OUTCOME_LABEL[rule.outcome] || rule.outcome, rule.outcome));
+    if (rule.message) card.append(el("p", { text: rule.message }));
+  } else {
+    const automatic = rule.check_outcome || rule.ai_outcome || rule.outcome;
+    const assistant = rule.ai_outcome || automatic;
+    const aiMessage = rule.ai_message ?? rule.message;
+    const options = Object.entries(OUTCOME_LABEL).map(([value, text]) => el("option", { value, text }));
+    const select = el("select", { value: rule.outcome, "data-rule": key,
+      "aria-label": `Decision for ${rule.name}` }, options);
+    // Preserve an explicit legacy choice, even when it matches today's automatic result.
+    select.dataset.override = review.rules?.[key] || "";
+    decision.append(select);
+    card.append(el("p", { class: "finding-original", text:
+      `Assistant selected ${OUTCOME_LABEL[assistant] || assistant}${aiMessage ? " · " + aiMessage : ""}` }));
+    if (automatic !== assistant || (rule.check_message != null && rule.check_message !== aiMessage)) {
+      card.append(el("p", { text: `Current check: ${OUTCOME_LABEL[automatic] || automatic}${rule.check_message ? " · " + rule.check_message : ""}` }));
+    }
+    const reason = el("textarea", { rows: 2, "data-reason": key, "aria-label": `Your reason for ${rule.name}`,
+      value: review.rule_reasons?.[key] || "", placeholder: "Explain your decision for this invoice." });
+    const label = el("label", { class: "finding-reason" }, "Your reason", reason);
+    const edit = button("Edit reason", () => {
+      label.hidden = false;
+      edit.hidden = true;
+      reason.focus();
+    }, "link");
+    const reset = button("Reset finding", () => {
+      select.value = automatic;
+      select.dataset.override = "";
+      reason.value = "";
+      state.reviewDirty = true;
+      update();
+      select.focus();
+    }, "link");
+    reset.dataset.resetFinding = key;
+    const update = () => {
+      card.classList.remove(...Object.keys(OUTCOME_LABEL));
+      card.classList.add(select.value);
+      select.className = `finding-decision ${select.value}`;
+      const changed = Boolean(select.dataset.override || reason.value);
+      const required = select.dataset.override && new Set([automatic, select.value]).size === 2 &&
+        [automatic, select.value].every(value => value === "passed" || value === "failed");
+      label.firstChild.textContent = required ? "Your reason (required)" : "Your reason";
+      reason.required = Boolean(required);
+      label.hidden = !changed;
+      edit.hidden = changed;
+      reset.hidden = !changed;
+    };
+    select.addEventListener("change", () => {
+      select.dataset.override = select.value === automatic ? "" : select.value;
+      state.reviewDirty = true;
+      update();
+    });
+    reason.addEventListener("input", () => {
+      state.reviewDirty = true;
+      reset.hidden = !reason.value && !select.dataset.override;
+    });
+    update();
+    card.append(label, el("div", { class: "action-row small" }, edit, reset));
+  }
+  card.append(el("div", { class: "action-row small" },
+    pages?.length ? editEvidence("rules", key, rule.name, rule.evidence, pages) : null,
+    promptButton("Copy question", `Explain the finding "${rule.name}" (rule "${key}") for ${basePrompt}${mark ? ` at mark ${mark.number} on page ${mark.page}` : ""}. Verify the evidence and explain any uncertainty.`)));
+  return card;
+}
+
+function findingsList(result, marks, pages, basePrompt) {
+  const items = (result.rule_results || []).map(rule => {
+    const mark = marks.find(m => m.label === rule.name && m.kind === rule.outcome && (!rule.evidence?.box || (m.page === rule.evidence.page && m.box.join() === rule.evidence.box.join())));
+    const page = mark?.page ?? rule.evidence?.page ?? result.visual?.[rule.rule_id]?.page;
+    return findingCard(rule, result.review || {}, mark, page, pages, basePrompt);
   });
   return el("ul", { class: "findings" }, items.length ? items : [el("li", { class: "empty", text: "No confirmed rules apply to this document type." })]);
 }
 
-function fieldsTable(result, marks) {
+function valueEditor(field, input, type) {
+  const editor = el("label", { hidden: true }, "Value for this invoice", input);
+  const edit = button("Edit", () => {
+    const title = `Edit ${field.label}`;
+    const dialog = el("dialog", { class: "value-edit-dialog", "aria-label": title }, el("h2", { text: title }));
+    const correct = button("Correct this invoice’s value", () => {
+      dialog.close();
+      editor.hidden = false;
+      input.focus();
+    });
+    correct.autofocus = true;
+    const instructions = field.id ? el("button", { type: "button", class: "ghost", text: "Edit instructions for future invoices",
+      "data-edit-field": field.id, "data-type": type, onclick: () => dialog.close() }) : null;
+    dialog.append(el("div", { class: "value-edit-options" }, correct, instructions,
+      button("Cancel", () => dialog.close(), "link")));
+    dialog.addEventListener("close", () => dialog.remove(), { once: true });
+    document.getElementById("invoice-detail").append(dialog);
+    edit.focus({ preventScroll: true });
+    dialog.showModal();
+  }, "link");
+  edit.setAttribute("aria-label", `Edit ${field.label}`);
+  edit.setAttribute("aria-haspopup", "dialog");
+  return el("div", { class: "inline-edit" }, edit, editor);
+}
+
+function fieldsTable(result, marks, pages) {
   const original = (result.ai_original || result).fields || {};
   const previous = result.review?.fields || {};
   const configured = state.config.fields.filter(f => f.type_id === result.type_id);
@@ -241,18 +549,20 @@ function fieldsTable(result, marks) {
     const read = original[f.name] || {};
     const corrected = Object.hasOwn(previous, f.name);
     const value = corrected ? previous[f.name] : read.value;
-    const mark = marks.find(m => m.label === f.name) || marks.find(m => read.box && m.page === read.page && m.box.join() === read.box.join());
+    const located = result.review?.evidence?.fields?.[f.name] || read;
+    const mark = marks.find(m => m.label === f.name) || marks.find(m => located.box && m.page === located.page && m.box.join() === located.box.join());
     const input = el("input", { value: value ?? "", "data-field": f.name, "aria-label": `Correct value for ${f.label}`,
       oninput: event => { state.reviewDirty = true; event.target.dataset.changed = "1"; } });
-    return el("li", { class: "value-card" },
-      el("div", { class: "top" }, el("b", { text: f.label }), corrected ? pill("Corrected", "reviewed") : null),
+    const card = el("li", { class: "value-card" },
+      corrected ? pill("Corrected", "reviewed") : null,
       el("p", { class: "field-value", text: value ?? "No value found" }),
       corrected ? el("p", { class: "small muted", text: `Originally read: ${read.value ?? "No value found"}` }) : null,
       read.status === "uncertain" ? pill("Uncertain", "unclear") : null,
       read.note ? el("p", { class: "small", text: read.note }) : null,
-      evidenceControl(mark), editControl("Edit value", input, "Value for this invoice"),
-      f.id ? el("button", { type: "button", class: "link", text: "Edit project field instructions",
-        "data-edit-field": f.id, "data-type": result.type_id }) : null);
+      valueEditor(f, input, result.type_id),
+      pages?.length ? editEvidence("fields", f.name, f.label, (result.review?.evidence?.fields || {})[f.name] || read, pages) : null);
+    card.prepend(evidenceHeading(card, f.label, mark, mark?.page ?? located.page, pages));
+    return card;
   });
   return el("ul", { class: "findings" }, items.length ? items : [el("li", { class: "empty", text: "No fields configured for this type." })]);
 }
@@ -267,17 +577,20 @@ function reviewBox(result) {
       button("Confirm review", () => submitReview("confirmed"), "primary")));
 }
 
-function viewer(pages, marks, prefix = "invoice") {
+function viewer(pages, marks, prefix = "invoice", onMark) {
   if (!pages?.length) return el("p", { class: "empty", text: "No page images available." });
   const frames = pages.map((src, i) => {
     const frame = el("div", { class: "viewer" }, el("img", { src: projectUrl(src), alt: `Invoice page ${i + 1}` }));
     for (const mark of (marks || []).filter(m => m.page === i + 1)) {
       const [left, top, right, bottom] = mark.box;
+      const label = String(mark.number);
+      const number = onMark ? button(label, () => onMark(mark), "mark-number") : el("span", { class: "mark-number", text: label });
+      if (onMark) number.setAttribute("aria-label", `Return to the review card for mark ${label} on page ${mark.page}`);
       frame.append(el("div", { id: `${prefix}-mark-${mark.number}`, class: `mark ${mark.kind}`,
         style: `left:${left*100}%;top:${top*100}%;width:${(right-left)*100}%;height:${(bottom-top)*100}%` },
-        el("span", { text: String(mark.number) })));
+        number));
     }
-    return el("figure", {}, el("figcaption", { text: `Page ${i+1} of ${pages.length}` }), frame);
+    return el("figure", { id: `${prefix}-page-${i + 1}` }, el("figcaption", { text: `Page ${i+1} of ${pages.length}` }), frame);
   });
   return el("section", { class: "document-viewer", tabindex: "0", "aria-label": "Invoice evidence pages" }, frames);
 }
@@ -297,26 +610,48 @@ function collectReview() {
   }
   const rules = {};
   for (const select of document.querySelectorAll("#invoice-detail select[data-rule]")) {
-    if (select.value) rules[select.dataset.rule] = select.value;
+    if (select.dataset.override) rules[select.dataset.rule] = select.dataset.override;
   }
-  return { fields, rules };
+  const rule_reasons = {};
+  for (const input of document.querySelectorAll("#invoice-detail textarea[data-reason]")) {
+    if (input.value.trim()) rule_reasons[input.dataset.reason] = input.value.trim();
+  }
+  return { fields, rules, rule_reasons, evidence: result.review?.evidence || {} };
 }
 
 async function submitReview(status) {
   const id = state.selected;
   const project = state.current;
-  const body = { ...collectReview(), status, revision: state.detail.revision, learning: document.getElementById("review-tip").value };
+  const scope = invoiceScope;
+  const tip = document.getElementById("review-tip");
+  const current = () => currentInvoiceScope(project, scope) && state.selected === id && tip.isConnected;
+  const body = { ...collectReview(), status, revision: state.detail.revision, learning: tip.value };
   if (status === "confirmed") {
-    const changes = [...Object.entries(body.fields).map(([key, value]) => `${key} → ${value ?? "empty"}`), ...Object.entries(body.rules).map(([key, value]) => `${key} → ${value}`)];
+    const changes = Object.entries(body.fields).map(([key, value]) => `${key} → ${value ?? "empty"}`);
+    for (const rule of state.detail.result.rule_results || []) {
+      const decision = body.rules[rule.rule_id], reason = body.rule_reasons[rule.rule_id];
+      if (decision || reason) changes.push(`${rule.name} → ${OUTCOME_LABEL[decision || rule.check_outcome || rule.outcome]}${reason ? " · " + reason : ""}`);
+    }
     const note = changes.length ? ` Corrections: ${changes.join(", ")}.` : "";
     if (!(await askConfirm(`Confirm the review for ${id} in project ${project}?${note}${body.learning ? " The tip will also be saved for future checks." : ""}`, "Confirm review"))) return;
   }
+  if (!current()) return;
+  // Keep the submitted values stable while the server publishes the result and PDF.
+  const controls = [...document.querySelectorAll(
+    "#invoice-detail select[data-rule], #invoice-detail [data-reason], #invoice-detail [data-reset-finding], #invoice-detail [data-field], #review-tip, #invoice-detail .review-box button")];
+  if (controls.some(control => control.disabled)) return;
+  controls.forEach(control => { control.disabled = true; });
+  state.reviewDirty = true;
   try {
     await api("POST", `/api/result/${encodeURIComponent(id)}/review`, body, project);
-    if (state.selected !== id || state.current !== project) return;
+    if (!current()) return;
     state.reviewDirty = false;
     notify(status === "confirmed" ? "Review confirmed and saved." : "Draft saved.");
     await loadInvoices();
-    await selectInvoice(id, true);
-  } catch (error) { notify(error.message, true); }
+    if (current()) await selectInvoice(id, true, project);
+  } catch (error) {
+    if (current()) notify(error.message, true);
+  } finally {
+    controls.forEach(control => { control.disabled = false; });
+  }
 }

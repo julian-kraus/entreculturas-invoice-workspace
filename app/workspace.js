@@ -11,13 +11,40 @@ export const state = {
   reviewDirty: false,
   config: null,
   draft: null,
-  setupSub: "rules",
+  setupSub: null,
   setupDirty: false,
+  inboxBusy: false,
+  settingsSub: "export",
+  settingsDirty: false,
+  settingsSaving: false,
   typeFilter: "",
-  statusFilter: "confirmed",
+  editRule: null,
 };
 
 // ---------- helpers ----------
+const labelCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
+export function compareLabels(left, right) {
+  return labelCollator.compare(left, right);
+}
+
+function sortSelectOptions(select) {
+  const selected = select.selectedOptions[0];
+  const options = [...select.options].sort((a, b) => {
+    const promptFirst = Number(b.hasAttribute("data-placeholder")) - Number(a.hasAttribute("data-placeholder"));
+    return promptFirst || compareLabels(a.label, b.label);
+  });
+  select.replaceChildren(...options);
+  select.selectedIndex = selected ? options.indexOf(selected) : -1;
+}
+
+export function setSelectOptions(select, ...options) {
+  const previous = select.value;
+  select.replaceChildren(...options);
+  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  sortSelectOptions(select);
+}
+
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -25,13 +52,19 @@ export function el(tag, attrs = {}, ...children) {
     if (key === "class") node.className = value;
     else if (key === "text") node.textContent = value;
     else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
-    else if (key === "value") node.value = value;
+    else if (key === "value") {
+      if (tag !== "select") node.value = value;
+    }
     else if (key === "checked") node.checked = Boolean(value);
     else node.setAttribute(key, value === true ? "" : value);
   }
   for (const child of children.flat()) {
     if (child === null || child === undefined || child === false) continue;
     node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  if (tag === "select") {
+    sortSelectOptions(node);
+    if (attrs.value != null && attrs.value !== false) node.value = attrs.value;
   }
   return node;
 }
@@ -52,6 +85,7 @@ export async function api(method, path, body, project = state.current) {
   }
   const global = globalRoutes.has(path);
   if (!global && !project) throw new Error("Choose a project first.");
+  if (!global && project !== state.current) throw new Error("The project changed. Open the record again.");
   const response = await fetch(global ? path : projectUrl(path, project), options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
@@ -104,8 +138,17 @@ export function askConfirm(message, yesLabel = "Leave without saving") {
   });
 }
 
+export function hasUnsavedChanges() {
+  return state.setupDirty || state.inboxBusy || state.reviewDirty || state.settingsDirty;
+}
+
 export async function confirmLeave() {
-  if (state.setupDirty || state.reviewDirty) return askConfirm("You have unsaved changes. Leave without saving?");
+  if (state.inboxBusy) return false;
+  if (state.settingsSaving) {
+    notify("Settings are being saved.");
+    return false;
+  }
+  if (hasUnsavedChanges()) return askConfirm("You have unsaved changes. Leave without saving?");
   return true;
 }
 
@@ -115,7 +158,7 @@ export async function copyText(text, message) {
     notify(message);
   } catch {
     const value = el("textarea", { value: text, readOnly: true, "aria-label": "Text to copy", rows: 6 });
-    const dialog = el("dialog", { class: "wide" }, el("h2", { text: "Copy text" }), value,
+    const dialog = el("dialog", { class: "wide", "aria-labelledby": "copy-dialog-title" }, el("h2", { id: "copy-dialog-title", text: "Copy text" }), value,
       button("Close", () => dialog.close()));
     dialog.addEventListener("close", () => dialog.remove(), { once: true });
     document.body.append(dialog);
@@ -129,20 +172,80 @@ export function button(text, onclick, style = "ghost") {
   return el("button", { type: "button", class: style, onclick, text });
 }
 
+export function radioGroup(name, label, choices, selected, onSelect) {
+  return el("fieldset", { class: "choice-group" }, el("legend", { text: label }),
+    choices.map(([value, text]) => el("label", {},
+      el("input", { type: "radio", name, value, checked: selected === value, onchange: () => onSelect(value) }), text)));
+}
+
 export function promptButton(label, request) {
   return button(label, () => copyText(request, "Request copied. Paste it into your project chat."));
 }
 
-export async function uploadFiles(files, endpoint) {
-  let added = 0;
-  const project = state.current;
+export async function uploadFiles(files, endpoint, project = state.current) {
+  const results = [];
   for (const file of files) {
     try {
       const data = await readFileAsDataUrl(file);
-      if (state.current !== project) break;
+      if (state.current !== project) throw new Error("The selected project changed.");
       await api("POST", endpoint, { name: file.name, data }, project);
-      added += 1;
-    } catch (error) { notify(`${file.name}: ${error.message}`, true); }
+      results.push({ file, error: null });
+    } catch (error) { results.push({ file, error: error.message }); }
   }
-  return added;
+  return results;
+}
+
+export function uploadSummary(results, retry) {
+  const failed = results.filter(result => result.error);
+  const added = results.length - failed.length;
+  const panel = el("section", { class: "card upload-results", role: "status" },
+    el("p", { text: `${added} added, ${failed.length} failed.` }),
+    el("ul", {}, results.map(result => el("li", { text: `${result.file.name} — ${result.error || "Added"}` }))));
+  if (failed.length) panel.append(button("Retry failed files", async event => {
+    event.currentTarget.disabled = true;
+    await retry(failed.map(result => result.file));
+  }));
+  panel.append(button("Dismiss", () => panel.remove()));
+  return panel;
+}
+
+// Detection jobs remain scoped to their project while the user navigates.
+const detectionJobs = new Map();
+const detectionPending = new Set();
+
+function announceDetection(project, result) {
+  detectionJobs.set(project, result);
+  window.dispatchEvent(new CustomEvent("rule-detection", { detail: { project, ...result } }));
+}
+
+export async function refreshRuleDetection(project) {
+  if (!project || state.current !== project) return;
+  try {
+    const result = await api("GET", "/api/rule-detection/status", undefined, project);
+    announceDetection(project, result);
+    if (result.status === "running" && !detectionPending.has(project)) {
+      detectionPending.add(project);
+      setTimeout(async () => {
+        detectionPending.delete(project);
+        if (state.current === project) await refreshRuleDetection(project);
+      }, 3000);
+    }
+  } catch (error) {
+    if (state.current === project) announceDetection(project, { status: "failed", message: error.message });
+  }
+}
+
+export async function startRuleDetection(project) {
+  if (!project || state.current !== project) return;
+  try {
+    const result = await api("POST", "/api/rule-detection/start", {}, project);
+    announceDetection(project, result);
+    await refreshRuleDetection(project);
+  } catch (error) {
+    if (state.current === project) {
+      await refreshRuleDetection(project);
+      if (detectionJobs.get(project)?.status !== "running")
+        announceDetection(project, { status: "failed", message: error.message });
+    }
+  }
 }

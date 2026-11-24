@@ -1,6 +1,6 @@
 ---
 name: open-workspace
-description: Start the invoice workspace page so the person can review invoices, edit rules and descriptions, and see test results. Use when someone asks to open the workspace, the page, or the review screen.
+description: Start the invoice workspace page so the person can review invoices and edit rules and descriptions. Use when someone asks to open the workspace, the page, or the review screen.
 ---
 
 # Open the workspace page

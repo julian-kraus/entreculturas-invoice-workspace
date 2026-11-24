@@ -1,4 +1,4 @@
-"""Parsing and comparing amounts, dates and text the same way everywhere."""
+"""Parse amounts and dates and normalize text for invoice checks."""
 
 from __future__ import annotations
 
@@ -79,19 +79,3 @@ def _safe_date(year: int, month: int, day: int) -> date | None:
         return date(year, month, day)
     except ValueError:
         return None
-
-
-def same_value(expected, actual, kind: str = "text") -> bool:
-    """Compare a confirmed answer with a result, tolerant of formatting."""
-    if expected in (None, "") and actual in (None, ""):
-        return True
-    if expected in (None, "") or actual in (None, ""):
-        return False
-    if kind == "amount":
-        a, b = parse_amount(expected), parse_amount(actual)
-        return a is not None and b is not None and abs(a - b) < 0.01
-    if kind == "date":
-        a, b = parse_date(expected), parse_date(actual)
-        if a and b:
-            return a == b
-    return plain(expected) == plain(actual)

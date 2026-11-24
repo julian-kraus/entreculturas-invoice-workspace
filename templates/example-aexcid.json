@@ -1,7 +1,7 @@
 {
   "format": "invoice-workspace-setup/1",
   "project": {
-    "name": "Example AEXCID project",
+    "name": "Template project",
     "funder": "AEXCID (Junta de Extremadura)",
     "period_start": "2025-01-01",
     "period_end": "2026-12-31",
@@ -1126,6 +1126,294 @@
       "kind": "date",
       "required": false,
       "hint": "Date on the supplier's own invoice."
+    },
+    {
+      "id": "VIAJES_vendor_address",
+      "type_id": "VIAJES",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "VIAJES_client_name",
+      "type_id": "VIAJES",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "VIAJES_description",
+      "type_id": "VIAJES",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "VIAJES_language",
+      "type_id": "VIAJES",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
+    },
+    {
+      "id": "PERS_LOCAL_vendor_address",
+      "type_id": "PERS_LOCAL",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "PERS_LOCAL_client_name",
+      "type_id": "PERS_LOCAL",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "PERS_LOCAL_description",
+      "type_id": "PERS_LOCAL",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "PERS_LOCAL_language",
+      "type_id": "PERS_LOCAL",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
+    },
+    {
+      "id": "PERS_SEDE_vendor_address",
+      "type_id": "PERS_SEDE",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "PERS_SEDE_client_name",
+      "type_id": "PERS_SEDE",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "PERS_SEDE_description",
+      "type_id": "PERS_SEDE",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "PERS_SEDE_language",
+      "type_id": "PERS_SEDE",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
+    },
+    {
+      "id": "EQUIPOS_vendor_address",
+      "type_id": "EQUIPOS",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "EQUIPOS_client_name",
+      "type_id": "EQUIPOS",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "EQUIPOS_description",
+      "type_id": "EQUIPOS",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "EQUIPOS_language",
+      "type_id": "EQUIPOS",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
+    },
+    {
+      "id": "CONSUMIBLES_vendor_address",
+      "type_id": "CONSUMIBLES",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "CONSUMIBLES_client_name",
+      "type_id": "CONSUMIBLES",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "CONSUMIBLES_description",
+      "type_id": "CONSUMIBLES",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "CONSUMIBLES_language",
+      "type_id": "CONSUMIBLES",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
+    },
+    {
+      "id": "VOLUNTARIOS_vendor_address",
+      "type_id": "VOLUNTARIOS",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "VOLUNTARIOS_client_name",
+      "type_id": "VOLUNTARIOS",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "VOLUNTARIOS_description",
+      "type_id": "VOLUNTARIOS",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "VOLUNTARIOS_language",
+      "type_id": "VOLUNTARIOS",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
+    },
+    {
+      "id": "SERV_TECNICOS_vendor_address",
+      "type_id": "SERV_TECNICOS",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "SERV_TECNICOS_client_name",
+      "type_id": "SERV_TECNICOS",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "SERV_TECNICOS_description",
+      "type_id": "SERV_TECNICOS",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "SERV_TECNICOS_language",
+      "type_id": "SERV_TECNICOS",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
+    },
+    {
+      "id": "FUNCIONAMIENTO_vendor_address",
+      "type_id": "FUNCIONAMIENTO",
+      "name": "vendor_address",
+      "label": "Supplier address",
+      "kind": "text",
+      "hint": "Address printed for the supplier or issuer.",
+      "required": false
+    },
+    {
+      "id": "FUNCIONAMIENTO_client_name",
+      "type_id": "FUNCIONAMIENTO",
+      "name": "client_name",
+      "label": "Client name",
+      "kind": "text",
+      "hint": "Name of the client or recipient identified on the invoice.",
+      "required": false
+    },
+    {
+      "id": "FUNCIONAMIENTO_description",
+      "type_id": "FUNCIONAMIENTO",
+      "name": "description",
+      "label": "Expense description",
+      "kind": "text",
+      "hint": "A description of the purpose of the expense when stated in the document.",
+      "required": false
+    },
+    {
+      "id": "FUNCIONAMIENTO_language",
+      "type_id": "FUNCIONAMIENTO",
+      "name": "language",
+      "label": "Document language",
+      "kind": "text",
+      "hint": "Language used in the source document.",
+      "required": false
     }
   ],
   "rules": [

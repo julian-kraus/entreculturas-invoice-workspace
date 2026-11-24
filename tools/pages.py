@@ -1,8 +1,8 @@
 """Turn invoice files into page images the assistant can look at.
 
 Usage:
-  ./.tools/uv run tools/pages.py pending [--set evaluation]     # invoices without a result yet
-  ./.tools/uv run tools/pages.py render <invoice> [--set evaluation]
+  ./.tools/uv run tools/pages.py pending     # invoices without a result yet
+  ./.tools/uv run tools/pages.py render <invoice>
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ from common import (
 DPI = 200
 
 
-def render(slug: str, invoice_id: str, which: str) -> list[dict]:
-    source = invoice_path(slug, invoice_id, which)
-    out = work_dir(slug, invoice_id, which)
+def render(slug: str, invoice_id: str) -> list[dict]:
+    source = invoice_path(slug, invoice_id)
+    out = work_dir(slug, invoice_id)
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("page-*.png"):
         old.unlink()
@@ -49,18 +49,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["pending", "render"])
     parser.add_argument("invoice", nargs="?")
-    parser.add_argument("--set", dest="which", default="invoices", choices=["invoices", "evaluation"])
     args = parser.parse_args()
     try:
         slug = current_project()
         if args.command == "pending":
-            files = invoice_files(slug, args.which)
-            pending = [i for i in files if not result_path(slug, i, args.which).exists()]
-            print_json({"project": slug, "set": args.which, "pending": pending, "total": len(files)})
+            files = invoice_files(slug)
+            pending = [i for i in files if not result_path(slug, i).exists()]
+            print_json({"project": slug, "set": "invoices", "pending": pending, "total": len(files)})
         else:
             if not args.invoice:
                 raise WorkspaceError("Say which invoice to render.")
-            print_json({"invoice": args.invoice, "pages": render(slug, args.invoice, args.which)})
+            print_json({"invoice": args.invoice, "pages": render(slug, args.invoice)})
     except WorkspaceError as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1

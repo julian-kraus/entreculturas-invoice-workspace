@@ -5,8 +5,8 @@ applies the rules, adds checks across all invoices of the project (duplicate inv
 and writes the outcome back. Reviewer corrections in the "review" part always win.
 
 Usage:
-  ./.tools/uv run tools/checks.py run <invoice> [--set evaluation]
-  ./.tools/uv run tools/checks.py run --all [--set evaluation]
+  ./.tools/uv run tools/checks.py run <invoice>
+  ./.tools/uv run tools/checks.py run --all
 """
 
 from __future__ import annotations
@@ -15,11 +15,12 @@ import argparse
 import re
 import sys
 
-from common import WorkspaceError, current_project, load_config, load_json, now_iso, print_json, set_dirs
+from common import WorkspaceError, current_project, load_config, load_json, now_iso, print_json, project_dir
 from values import parse_amount, parse_date, plain
 
 FIELD_STATUSES = {"found", "uncertain", "not_found"}
 VERDICTS = {"pass", "fail", "unclear"}
+RULE_OUTCOMES = ("passed", "failed", "unclear", "not_applicable")
 DUPLICATE_RULE = "DUPLICATE_NUMBER"
 
 
@@ -66,6 +67,9 @@ def final_fields(result: dict) -> dict[str, dict]:
         entry["value"] = value
         entry["status"] = "found" if value not in (None, "") else "not_found"
         entry["corrected"] = True
+    for name, location in (((result.get("review") or {}).get("evidence") or {}).get("fields") or {}).items():
+        if name in fields:
+            fields[name].update(location)
     return fields
 
 
@@ -132,6 +136,37 @@ def apply_rule(rule: dict, result: dict, fields: dict, project: dict) -> dict:
             "outcome": outcome, "message": message, "evidence": evidence}
 
 
+def reviewed_findings(result: dict, findings: list[dict]) -> list[dict]:
+    """Keep the initial reading, the automatic check and the reviewer's explanation distinct."""
+    review = result.get("review") or {}
+    if not review:
+        return findings
+    originals = {item["rule_id"]: item for item in (result.get("ai_original") or {}).get("rule_results", [])}
+    decisions = review.get("rules") or {}
+    reasons = review.get("rule_reasons") or {}
+    reviewed = []
+    for finding in findings:
+        key = finding["rule_id"]
+        # Older reviewed records stored the pre-override outcome in ai_outcome
+        # and left the automatic explanation in message.
+        automatic = finding.get("check_outcome", finding.get("ai_outcome", finding["outcome"]))
+        explanation = finding.get("check_message", finding.get("message", ""))
+        original = originals.get(key, {})
+        decision = decisions.get(key)
+        outcome = decision if decision in RULE_OUTCOMES else automatic
+        reason = reasons.get(key, "")
+        location = (review.get("evidence") or {}).get("rules", {}).get(key)
+        reviewed.append(finding | {
+            "evidence": location or finding.get("evidence"),
+            "ai_outcome": original.get("ai_outcome", original.get("outcome", automatic)),
+            "ai_message": original.get("ai_message", original.get("message", explanation)),
+            "check_outcome": automatic, "check_message": explanation,
+            "outcome": outcome, "overridden": decision in RULE_OUTCOMES,
+            "review_reason": reason, "message": reason or (explanation if outcome == automatic else ""),
+        })
+    return reviewed
+
+
 def evaluate(result: dict, config: dict, duplicates: dict[str, list[str]]) -> dict:
     fields = final_fields(result)
     project = config["project"]
@@ -146,12 +181,7 @@ def evaluate(result: dict, config: dict, duplicates: dict[str, list[str]]) -> di
         outcomes.append({"rule_id": DUPLICATE_RULE, "name": "Invoice number used only once", "severity": "warning",
                          "outcome": "failed", "message": f"Number {number} also appears on: {', '.join(others)}.",
                          "evidence": None})
-    for rule_id, outcome in ((result.get("review") or {}).get("rules") or {}).items():
-        for item in outcomes:
-            if item["rule_id"] == rule_id and outcome in ("passed", "failed"):
-                item["ai_outcome"] = item.get("ai_outcome", item["outcome"])
-                item["outcome"] = outcome
-                item["overridden"] = True
+    outcomes = reviewed_findings(result, outcomes)
     failed_errors = [o for o in outcomes if o["outcome"] == "failed" and o["severity"] == "error"]
     needs_look = [o for o in outcomes if o["outcome"] == "unclear" or (o["outcome"] == "failed" and o["severity"] != "error")]
     uncertain = [n for n, f in fields.items() if f.get("status") == "uncertain"]
@@ -172,20 +202,21 @@ def record_for_display(stored: dict | None) -> dict | None:
         return None
     result = {k: v for k, v in stored.items() if k != "pending_recheck"}
     if "rule_results" in result:
+        result["rule_results"] = reviewed_findings(result, result["rule_results"])
         result["rules_checked"] = sum(o["rule_id"] != DUPLICATE_RULE for o in result["rule_results"])
         if not result["rules_checked"]:
             result["status"] = "no applicable rules"
     return result
 
 
-def checked_result(slug: str, which: str, result: dict) -> dict:
+def checked_result(slug: str, result: dict) -> dict:
     config = load_config(slug)
     problems = validate(result, config)
     if problems:
         raise WorkspaceError("The result file needs fixing:\n- " + "\n- ".join(problems))
     # Evaluate the incoming reading in memory. It must not temporarily replace
     # a confirmed result just to participate in the duplicate-number check.
-    _, results_dir = set_dirs(slug, which)
+    results_dir = project_dir(slug) / "results"
     duplicates: dict[str, list[str]] = {}
     for path in results_dir.glob("*.json"):
         if path.name.startswith(".") or path.stem == result["invoice"]:
@@ -197,9 +228,9 @@ def checked_result(slug: str, which: str, result: dict) -> dict:
     return result | evaluate(result, config, duplicates)
 
 
-def run(slug: str, invoice_id: str, which: str = "invoices") -> dict:
+def run(slug: str, invoice_id: str) -> dict:
     from results import recalculate
-    return recalculate(slug, invoice_id, which)
+    return recalculate(slug, invoice_id)
 
 
 def main() -> int:
@@ -207,12 +238,11 @@ def main() -> int:
     parser.add_argument("command", choices=["run"])
     parser.add_argument("invoice", nargs="?")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--set", dest="which", default="invoices", choices=["invoices", "evaluation"])
     args = parser.parse_args()
     try:
         slug = current_project()
         if args.all:
-            _, results_dir = set_dirs(slug, args.which)
+            results_dir = project_dir(slug) / "results"
             ids = sorted(p.stem for p in results_dir.glob("*.json") if not p.name.startswith(".")) if results_dir.exists() else []
         elif args.invoice:
             ids = [args.invoice]
@@ -220,7 +250,7 @@ def main() -> int:
             raise WorkspaceError("Say which invoice, or use --all.")
         summary = []
         for invoice_id in ids:
-            result = run(slug, invoice_id, args.which)
+            result = run(slug, invoice_id)
             summary.append({
                 "invoice": invoice_id, "status": result["status"],
                 "failed": [o["rule_id"] for o in result["rule_results"] if o["outcome"] == "failed"],

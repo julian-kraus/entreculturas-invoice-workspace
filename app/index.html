@@ -3,51 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Invoice Workspace</title>
+<title>Impendo Invoice Workspace</title>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">Invoice Workspace</div>
-  <label class="project-pick">Project
-    <select id="project-select" aria-label="Selected project"></select>
-  </label>
-  <button type="button" class="ghost" id="new-project-btn">New project</button>
-  <span class="spacer"></span>
-  <nav class="utilities" aria-label="Workspace tools">
-    <button type="button" class="ghost" id="tab-history" data-tab="history">History</button>
-    <button type="button" class="ghost" id="tab-tests" data-tab="tests">Evaluation</button>
-    <button type="button" class="ghost" id="tab-settings" data-tab="settings">Settings</button>
-    <button type="button" class="ghost" id="help-btn">Help</button>
-  </nav>
+  <h1 class="brand">Impendo Invoice Workspace</h1>
+  <div class="project-controls">
+    <label class="project-pick">Project
+      <span class="project-select-wrap"><select id="project-select" aria-label="Selected project"></select></span>
+    </label>
+    <button type="button" class="ghost" id="new-project-btn">New project</button>
+  </div>
 </header>
 
-<dialog id="help-dialog" class="wide">
-  <div class="dialog-head"><h2>Help</h2><button type="button" class="ghost" id="help-close">Close</button></div>
-  <h3>Ask in the chat</h3>
-  <ul>
-    <li><b>“Check the new invoices”</b>: reads each invoice, applies the confirmed rules and marks where it found things.</li>
-    <li><b>“Propose rules from the guidelines”</b>: suggests rules with their source page and where to look.</li>
-    <li><b>“Suggest improvements”</b>: looks at your corrections and proposes clearer descriptions. You approve them under Project setup.</li>
-    <li><b>“Run the test invoices”</b>: checks your test invoices again and compares with your confirmed answers.</li>
-    <li><b>“Switch to project …”</b> or <b>“Start a new project”</b>.</li>
-  </ul>
-  <h3>Check a specific invoice</h3>
-  <p>Open the invoice, choose <b>Copy check request</b> and paste the request into your project chat. For one finding, use its <b>Copy question</b> action. Project and invoice IDs travel with the request.</p>
-  <h3>On this page</h3>
-  <p>Add invoices, review and correct results, approve proposals, edit descriptions and rules, see the history, and choose models under Assistant settings.</p>
-  <h3>First-time setup</h3>
-  <ol>
-    <li>Sign in to Claude Code or Codex on this computer.</li>
-    <li>Open this folder in the app and ask: “Set this up”. The assistant installs Python and the required tools in the workspace folder.</li>
-    <li>Ask: “Open the workspace”, or double-click <code>start-workspace</code> in the folder.</li>
-    <li>Choose a project at the top, or create one (you can start from a colleague’s setup file).</li>
-    <li>Codex only: trust this folder when Codex asks, so it uses the assistant settings.</li>
-  </ol>
-  <p class="muted small">The full guide is in README.md in this folder.</p>
-</dialog>
-
-<dialog id="confirm-dialog">
+<dialog id="confirm-dialog" aria-labelledby="confirm-text">
   <p id="confirm-text"></p>
   <div class="row-end">
     <button type="button" class="ghost" id="confirm-no">Stay</button>
@@ -55,50 +25,75 @@
   </div>
 </dialog>
 
-<dialog id="new-project-dialog">
+<dialog id="new-project-dialog" aria-labelledby="new-project-title">
   <form method="dialog" id="new-project-form">
-    <h2>New project</h2>
+    <h2 id="new-project-title">New project</h2>
+    <div id="new-project-inputs">
     <label>Name <input id="new-project-name" required></label>
-    <label>Start from the types and rules of
-      <select id="new-project-copy"><option value="">Standard invoice fields</option></select>
+    <fieldset class="starting-setup">
+      <legend>Starting setup</legend>
+      <label><input type="radio" name="starting-setup" value="standard" checked>
+        <span><b>Standard invoice fields</b><small>Start with five common fields and no rules.</small></span>
+      </label>
+      <label><input type="radio" name="starting-setup" value="template">
+        <span><b>Bundled AEXCID template</b><small>Use the supplied invoice types, fields and proposed rules.</small></span>
+      </label>
+      <label id="copy-project-choice" hidden><input type="radio" name="starting-setup" value="copy">
+        <span><b>Copy an existing project</b><small>Use its current types, fields and rules. Confirmed rules become proposed.</small></span>
+      </label>
+      <label id="copy-project-label" hidden>Project to copy
+        <select id="new-project-copy" aria-label="Project to copy"></select>
+      </label>
+      <label><input type="radio" name="starting-setup" value="import">
+        <span><b>Import a setup file</b><small>Use a setup shared by a colleague.</small></span>
+      </label>
+      <label id="import-project-label" hidden>Setup file
+        <input type="file" id="new-project-file" accept=".json">
+      </label>
+    </fieldset>
+    <label>Funder guidelines (optional)
+      <input type="file" id="new-project-guidelines" accept=".pdf,.txt,.md" multiple>
+      <small>Guidelines are sent to Codex using your signed-in plan to detect proposed rules.</small>
     </label>
-    <p class="muted">Copied rules start as proposed, so you confirm which apply.</p>
-    <label>Or import a shared setup file
-      <input type="file" id="new-project-file" accept=".json">
-      <span class="small muted">The example setup is in templates/example-aexcid.json.</span>
-    </label>
+    </div>
+    <div id="new-project-result" hidden aria-live="polite"></div>
     <div class="row-end">
       <button type="button" class="ghost" id="new-project-cancel">Cancel</button>
       <button type="submit" class="primary">Create</button>
+      <button type="button" class="primary" id="new-project-propose" hidden>Copy rule proposal request</button>
     </div>
   </form>
 </dialog>
 
 <nav class="tabs" aria-label="Main navigation">
-  <button type="button" id="tab-invoices" aria-current="page" data-tab="invoices">Invoices</button>
-  <button type="button" id="tab-setup" data-tab="setup">Project setup</button>
+  <button type="button" id="tab-invoices" aria-current="page" aria-controls="panel-invoices" data-tab="invoices">Invoices</button>
+  <button type="button" id="tab-setup" aria-controls="panel-setup" data-tab="setup">Project setup</button>
+  <button type="button" id="tab-settings" aria-controls="panel-settings" data-tab="settings">Settings</button>
+  <button type="button" id="tab-help" aria-controls="panel-help" data-tab="help">Help</button>
 </nav>
 <main>
   <div id="notice" class="notice" role="status" hidden></div>
   <div id="no-project" class="empty" hidden><h2>Choose a project</h2><p>Select a project above or create one to start checking invoices.</p></div>
   <section id="panel-invoices" class="panel" aria-labelledby="tab-invoices">
     <div id="invoice-home">
-      <div class="section-head"><div><h1>Invoices</h1><p id="invoice-count" class="muted"></p></div>
-        <button type="button" class="ghost" id="report-btn">Download project workbook</button></div>
+      <div class="section-head"><div><h2 class="page-title">Invoices</h2><p id="invoice-count" class="muted"></p></div></div>
       <button type="button" class="drop" id="invoice-drop"><b>Add invoices</b><span>Choose PDFs or photos, or drop them here</span></button>
       <input type="file" id="invoice-upload" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple hidden>
-      <details id="pending-batch" class="batch" hidden><summary id="pending-summary"></summary>
-        <ul id="pending-files"></ul><button type="button" id="pending-copy" class="primary">Copy batch check request</button></details>
-      <ul id="invoice-list" class="invoice-list"></ul>
+      <div id="invoice-upload-results"></div>
+      <div id="pending-batch" class="pending-batch" hidden>
+        <strong id="pending-summary"></strong>
+        <button type="button" id="pending-copy" class="primary">Copy check request</button>
+      </div>
+      <ul id="invoice-list" class="navigation-list invoice-list"></ul>
     </div>
     <section id="invoice-detail" class="invoice-detail" hidden></section>
   </section>
   <section id="panel-setup" class="panel" aria-labelledby="tab-setup" hidden>
-    <div class="section-head"><h1>Project setup</h1></div>
-    <div id="guidelines-box"></div>
-    <div id="proposals-box"></div>
+    <div class="section-head"><h2 class="page-title">Project setup</h2></div>
+    <div id="setup-notice" class="setup-notice" role="status" aria-live="polite" hidden></div>
     <nav class="subtabs" aria-label="Setup sections">
-      <button data-sub="rules" class="active">Rules</button>
+      <button data-sub="inbox" hidden>Inbox <span id="inbox-count"></span></button>
+      <button data-sub="rules">Rules</button>
       <button data-sub="types">Invoice types</button>
       <button data-sub="fields">Fields to extract</button>
       <button data-sub="learnings">Tips from corrections</button>
@@ -107,9 +102,50 @@
     <div id="setup-body"></div>
   </section>
 
-  <section id="panel-tests" class="panel" aria-labelledby="tab-tests" hidden></section>
-  <section id="panel-history" class="panel" aria-labelledby="tab-history" hidden></section>
-  <section id="panel-settings" class="panel" aria-labelledby="tab-settings" hidden></section>
+  <section id="panel-settings" class="panel" aria-labelledby="tab-settings" hidden>
+    <div class="section-head"><h2 class="page-title">Settings</h2></div>
+    <nav class="subtabs" aria-label="Settings sections">
+      <button type="button" data-settings-sub="export" aria-controls="panel-export" aria-current="page">Export</button>
+      <button type="button" data-settings-sub="history" aria-controls="panel-history">History</button>
+      <button type="button" data-settings-sub="assistant" aria-controls="panel-assistant-settings">Assistant settings</button>
+    </nav>
+    <section id="panel-export" data-settings-panel="export" aria-labelledby="export-title" hidden>
+      <h3 id="export-title">Export</h3>
+      <div id="export-body"></div>
+    </section>
+    <section id="panel-history" data-settings-panel="history" aria-labelledby="history-title" hidden>
+      <h3 id="history-title">History</h3>
+      <div id="history-body"></div>
+    </section>
+    <section id="panel-assistant-settings" data-settings-panel="assistant" aria-labelledby="assistant-settings-title" hidden>
+      <h3 id="assistant-settings-title">Assistant settings</h3>
+      <div id="assistant-settings-body"></div>
+    </section>
+  </section>
+  <section id="panel-help" class="panel help" aria-labelledby="tab-help" hidden>
+    <div class="section-head"><h2 class="page-title">Help</h2></div>
+    <h3>Ask in the chat</h3>
+    <ul>
+      <li><b>“Check the new invoices”</b> reads each invoice, applies the confirmed rules and marks the evidence.</li>
+      <li><b>“Propose rules from the guidelines”</b> suggests rules, cites the source page and explains where to look.</li>
+      <li><b>“Suggest improvements”</b> uses your corrections to propose clearer descriptions. Review them in the Project setup Inbox.</li>
+      <li>Use <b>“Switch to project …”</b> or <b>“Start a new project”</b> to manage projects from the chat.</li>
+    </ul>
+    <h3>Check a specific invoice</h3>
+    <p>Open the invoice, choose <b>Copy check request</b> and paste the request into your project chat. For one finding, use its <b>Copy question</b> action. Project and invoice IDs travel with the request.</p>
+    <h3>Use the workspace</h3>
+    <p>Use <b>Invoices</b> to add invoices, review findings and correct results. Choose an outcome at the top of a rule finding and enter your reason, or use <b>Edit reason</b> to explain the existing decision. On a checked invoice, <b>Export</b> offers the marked PDF, CSV and copyable results.</p>
+    <p>Under <b>Project setup</b>, add funder guidelines in <b>Project details</b>, review proposals in the <b>Inbox</b> and edit descriptions and rules. In <b>Settings → Export</b>, you can also download workbooks, setup files and selected history entries, or copy a confirmed spreadsheet row. Open <b>History</b> to see project activity or <b>Assistant settings</b> to choose models.</p>
+    <h3>First-time setup</h3>
+    <ol>
+      <li>Sign in to Claude Code or Codex on this computer.</li>
+      <li>Open this folder in the app and ask “Set this up”. The assistant installs Python and the required tools in the workspace folder.</li>
+      <li>Ask “Open the workspace”, or double-click <code>start-workspace</code> in the folder.</li>
+      <li>Choose a project at the top, or create one. Choose Template project to start with the AEXCID invoice types, fields to extract and proposed rules.</li>
+      <li>If you use Codex, trust this folder when prompted so Codex uses the assistant settings.</li>
+    </ol>
+    <p class="muted small">The full guide is in README.md in this folder.</p>
+  </section>
 </main>
 
 <script type="module" src="/app.js"></script>
